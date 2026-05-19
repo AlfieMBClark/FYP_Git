@@ -592,14 +592,21 @@ def fetch_mmsi_track_anomalous(conn, mmsi) -> list:
         (mmsi,),
     ).fetchall()
 
+_RB_LAT_MIN, _RB_LAT_MAX, _RB_LON_MIN, _RB_LON_MAX = cfg.region_bounds
+
+
 def split_and_filter(rows) -> list:
     if not rows:
         return []
     timestamps, features = [], []
     for row in rows:
         try:
+            lat = float(row[1])
+            lon = float(row[2])
+            if not (_RB_LAT_MIN <= lat <= _RB_LAT_MAX and _RB_LON_MIN <= lon <= _RB_LON_MAX):
+                continue
             timestamps.append(ts_to_unix(row[0]))
-            features.append([float(row[1]), float(row[2]), float(row[3]),
+            features.append([lat, lon, float(row[3]),
                               float(row[4]), float(_itu_to_group(int(row[5])))])
         except (ValueError, TypeError):
             continue
@@ -762,44 +769,60 @@ def _banner(text: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AIS pipeline: DMA + JSONL → SQLite → training windows."
+        description=(
+            "AIS pipeline: DMA → dma.db (training), WorldwideAIS → worldwide.db (testing).\n"
+            "Each source is written to its own database so train and test vessels never overlap.\n\n"
+            "Full pipeline:\n"
+            "  python Data_Processing.py --dma <dir> --jsonl <dir>\n\n"
+            "DB ingestion only (skip prepare):\n"
+            "  python Data_Processing.py --dma <dir> --jsonl <dir> --db-only\n\n"
+            "Prepare windows only (DBs already built):\n"
+            "  python Data_Processing.py --prepare-only"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--dma",   default=None)
-    parser.add_argument("--jsonl", default=None)
-    parser.add_argument("--output",  default="data/ais.db")
-    parser.add_argument("--out-dir", default="data/", dest="out_dir")
+    parser.add_argument("--dma",   default=None,
+                        help="Path to DMA zip directory (training source).")
+    parser.add_argument("--jsonl", default=None,
+                        help="Path to WorldwideAIS .jsonl.gz directory (test source).")
+    parser.add_argument("--dma-output",   default=cfg.train_db_path, dest="dma_output",
+                        help=f"Output DB for DMA data (default: {cfg.train_db_path}).")
+    parser.add_argument("--jsonl-output", default=cfg.test_db_path,  dest="jsonl_output",
+                        help=f"Output DB for WorldwideAIS data (default: {cfg.test_db_path}).")
+    parser.add_argument("--out-dir", default="data/", dest="out_dir",
+                        help="Output directory for training window .bin files (default: data/).")
     parser.add_argument("--bbox", type=float, nargs=4,
-                        metavar=("LAT_MIN", "LAT_MAX", "LON_MIN", "LON_MAX"))
+                        metavar=("LAT_MIN", "LAT_MAX", "LON_MIN", "LON_MAX"),
+                        default=list(cfg.region_bounds),
+                        help="Bounding box filter applied to both sources "
+                             f"(default: Europe/N.Africa/Middle East {cfg.region_bounds}).")
     parser.add_argument("--ship-types", type=int, nargs="+", dest="ship_types")
     parser.add_argument("--date-from",  dest="date_from")
     parser.add_argument("--date-to",    dest="date_to")
     parser.add_argument("--limit",  type=int, default=None,
                         help="Max files per source (for testing).")
     parser.add_argument("--sample-rate", type=float, default=1.0, dest="sample_rate",
-                        help="Fraction of vessels to keep, e.g. 0.1 = 10%% of ships "
-                             "with ALL their pings (default 1.0 = all vessels). "
-                             "Sampled deterministically by MMSI.")
+                        help="Fraction of vessels to keep (default 1.0 = all).")
     parser.add_argument("--min-interval", type=int, default=None, dest="min_interval",
                         help="Seconds between kept pings per MMSI. "
-                             "Defaults to 0 when --sample-rate < 1 (keep full routes), "
-                             "or 60 when keeping all vessels.")
+                             "Defaults to 0 when --sample-rate < 1, else 60.")
     parser.add_argument("--workers", type=int,
                         default=max(1, cpu_count() // 2),
                         help="Parallel file-parsing processes (default: half CPU cores).")
-    parser.add_argument("--db-only",      action="store_true")
-    parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--db-only",      action="store_true",
+                        help="Ingest to DBs only — skip prepare phase.")
+    parser.add_argument("--prepare-only", action="store_true",
+                        help="Build training windows from existing dma.db — skip ingestion.")
     args = parser.parse_args()
 
     if not args.prepare_only and args.dma is None and args.jsonl is None:
         parser.error("Provide --dma and/or --jsonl, or use --prepare-only.")
 
-    # Smart default: full routes when sampling vessels, temporal downsample when keeping all
     if args.min_interval is None:
         args.min_interval = 0 if args.sample_rate < 1.0 else 60
 
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-
-    print(f"Database     : {args.output}")
+    print(f"Train DB     : {args.dma_output}  (DMA → training windows)")
+    print(f"Test DB      : {args.jsonl_output}  (WorldwideAIS → predict.py evaluation)")
     print(f"Out dir      : {args.out_dir}")
     print(f"Sample rate  : {args.sample_rate:.0%} of vessels")
     print(f"Min interval : {args.min_interval}s per MMSI")
@@ -810,36 +833,42 @@ def main():
     if args.date_to:    print(f"Date to      : {args.date_to}")
     if args.limit:      print(f"Limit        : {args.limit} files/source")
 
-    with sqlite3.connect(args.output) as conn:
-        if not args.prepare_only:
+    # ── Phase 1: DMA → dma.db ─────────────────────────────────────────────────
+    if args.dma and not args.prepare_only:
+        _banner("Phase 1 — DMA Conversion  →  training DB")
+        os.makedirs(os.path.dirname(args.dma_output) or ".", exist_ok=True)
+        with sqlite3.connect(args.dma_output) as conn:
             init_db(conn)
-
-        if args.dma and not args.prepare_only:
-            _banner("Phase 1 — DMA Conversion")
             run_dma_phase(conn, args)
-
-        if args.jsonl and not args.prepare_only:
-            _banner("Phase 2 — Worldwide AIS Conversion")
-            run_jsonl_phase(conn, args)
-
-        if not args.prepare_only:
             finalise_db(conn)
             print_db_summary(conn)
 
-        if args.db_only:
-            print("\nDone (--db-only: skipping prepare phase).")
-            return
+    # ── Phase 2: WorldwideAIS → worldwide.db ──────────────────────────────────
+    if args.jsonl and not args.prepare_only:
+        _banner("Phase 2 — Worldwide AIS Conversion  →  test DB")
+        os.makedirs(os.path.dirname(args.jsonl_output) or ".", exist_ok=True)
+        with sqlite3.connect(args.jsonl_output) as conn:
+            init_db(conn)
+            run_jsonl_phase(conn, args)
+            finalise_db(conn)
+            print_db_summary(conn)
 
-    _banner("Phase 3 — Prepare Dataset")
-    counts = run_prepare_phase(args.output, args.out_dir)
+    if args.db_only:
+        print("\nDone (--db-only: skipping prepare phase).")
+        return
+
+    # ── Phase 3: build training windows from DMA DB ───────────────────────────
+    _banner("Phase 3 — Prepare Training Windows  (source: DMA DB)")
+    counts = run_prepare_phase(args.dma_output, args.out_dir)
 
     print(f"\n{'═' * 60}\n  Pipeline complete.\n{'═' * 60}")
-    print(f"  train   : {counts['n_train']:,} windows")
-    print(f"  val     : {counts['n_val']:,} windows")
-    print(f"  test    : {counts['n_test']:,} windows")
+    print(f"  train   : {counts['n_train']:,} windows  ← from {args.dma_output}")
+    print(f"  val     : {counts['n_val']:,} windows  ← from {args.dma_output}")
+    print(f"  test    : {counts['n_test']:,} windows  ← from {args.dma_output} (DMA holdout)")
     print(f"  anomaly : {counts['n_anomaly']:,} windows  (FLAGS != 0, eval only)")
     print(f"  total   : {counts['n_train'] + counts['n_val'] + counts['n_test']:,} clean windows")
     print(f"  meta    : {counts['meta_path']}")
+    print(f"\n  Real evaluation → python predict.py --db {args.jsonl_output}")
 
 
 if __name__ == "__main__":

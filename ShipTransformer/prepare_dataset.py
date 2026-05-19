@@ -53,6 +53,7 @@ meaningful categorical signal instead of near-arbitrary integers.
 
 import argparse
 import json
+import math
 import sqlite3
 from collections import Counter
 from datetime import datetime, timezone
@@ -145,6 +146,9 @@ def fetch_mmsi_track_anomalous(
 
 # ── Track-level processing ────────────────────────────────────────────────────
 
+_RB_LAT_MIN, _RB_LAT_MAX, _RB_LON_MIN, _RB_LON_MAX = cfg.region_bounds
+
+
 def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
     """
     Convert raw DB rows for one MMSI into a list of normalised voyage arrays.
@@ -152,6 +156,8 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
     SHIP_TYPE is mapped from its raw ITU code to a group index (0–7) before
     normalisation.  Each returned array has shape (L, N_FEATURES) where
     L >= min_voyage_points.
+    Pings outside the configured region_bounds are skipped; any resulting
+    gaps are handled by the existing gap-splitting logic.
     """
     if not rows:
         return []
@@ -166,11 +172,14 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
             lon  = float(row[2])
             sog  = float(row[3])
             cog  = float(row[4])
-            grp  = float(_itu_to_group(int(row[5])))   # raw code → group 0-7
+            grp  = float(_itu_to_group(int(row[5])))
         except (ValueError, TypeError):
             continue
+        if not (_RB_LAT_MIN <= lat <= _RB_LAT_MAX and _RB_LON_MIN <= lon <= _RB_LON_MAX):
+            continue
         timestamps.append(t)
-        features.append([lat, lon, sog, cog, grp])
+        cog_rad = math.radians(cog)
+        features.append([lat, lon, sog, math.sin(cog_rad), math.cos(cog_rad), grp])
 
     if len(features) < cfg.min_voyage_points:
         return []
@@ -349,8 +358,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Pre-process AIS SQLite database into training window files."
     )
-    parser.add_argument("--db",  default=cfg.data_path,
-                        help="Path to the SQLite database (default: %(default)s)")
+    parser.add_argument("--db",  default=cfg.train_db_path,
+                        help="Path to the training SQLite database (default: %(default)s)")
     parser.add_argument("--out", default="data/",
                         help="Output directory for .bin files and metadata (default: %(default)s)")
     args = parser.parse_args()

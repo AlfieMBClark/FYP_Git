@@ -9,7 +9,11 @@ import torch
 
 class Config:
     # ── Paths ──────────────────────────────────────────────────────────────────
-    data_path     = "data/ais.db"
+    # Source databases — kept separate so train and test never share vessels.
+    # DMA data (2 years of dense Danish/North Sea AIS) is used for training.
+    # WorldwideAIS data is used only for evaluation and prediction.
+    train_db_path = "data/dma.db"
+    test_db_path  = "data/worldwide.db"
 
     # Pre-processed window files produced by prepare_dataset.py.
     # The .bin files are raw float32 memory-maps; shapes are in dataset_meta.json.
@@ -20,15 +24,24 @@ class Config:
     meta_path       = "data/dataset_meta.json"
 
     # ── Sequence lengths ───────────────────────────────────────────────────────
-    seq_len_enc = 30    # past pings seen by encoder
+    seq_len_enc = 60    # past pings seen by encoder (increased for better context)
     seq_len_dec = 10    # future pings predicted by decoder
 
-    # ── Train / val / test split (done at MMSI level, not window level) ────────
-    # Splitting by MMSI prevents the same vessel's pings appearing in both train
-    # and test, which would inflate test metrics due to track memorisation.
-    train_split = 0.80
+    # ── Train / val split (DMA DB only — test set is WorldwideAIS) ───────────
+    # Real held-out evaluation uses predict.py against worldwide.db, so we
+    # dedicate all DMA vessels to train/val rather than wasting 10% on a
+    # redundant test split from the same source.
+    train_split = 0.90
     val_split   = 0.10
-    # test = 1.0 - train_split - val_split = 0.10
+    # test = 0.0 — evaluation is done against worldwide.db via predict.py
+
+    # ── Geographic region filter ──────────────────────────────────────────────
+    # Bounding box for Europe, North Africa, and the Middle East.
+    # Applied at ingestion (Data_Processing.py --bbox default) and again when
+    # building training windows (prepare_dataset.py / Data_Processing.py Phase 3)
+    # so that existing databases are also cleaned on next prepare run.
+    # Format: (lat_min, lat_max, lon_min, lon_max)
+    region_bounds = (10.0, 75.0, -30.0, 65.0)
 
     # ── Track-level filters (applied in prepare_dataset.py) ───────────────────
     # Split a track into separate voyages when there is a gap longer than this.
@@ -89,21 +102,29 @@ class Config:
         "LAT":       (-90.0,   90.0),
         "LON":      (-180.0,  180.0),
         "SOG":        (0.0,    30.0),   # values above 30 kts are clamped, not dropped
-        "COG":        (0.0,   360.0),
+        "COG_SIN":   (-1.0,    1.0),    # sin(COG) — circular encoding avoids 359°/1° discontinuity
+        "COG_COS":   (-1.0,    1.0),    # cos(COG)
         "SHIP_TYPE":  (0.0,    7.0),    # group index 0–7 (see ship_type_groups)
     }
 
     # ── Features ──────────────────────────────────────────────────────────────
-    feature_cols = ["LAT", "LON", "SOG", "COG", "SHIP_TYPE"]
-    n_features   = len(feature_cols)    # 5
+    feature_cols = ["LAT", "LON", "SOG", "COG_SIN", "COG_COS", "SHIP_TYPE"]
+    n_features   = len(feature_cols)    # 6
 
     # ── Model architecture ────────────────────────────────────────────────────
-    d_model        = 128
+    d_model        = 256
     num_heads      = 8
-    num_layers     = 3
-    d_ff           = 512
+    num_layers     = 4
+    d_ff           = 1024
     dropout        = 0.1
     max_seq_length = 200
+
+    # ── Scheduled sampling ────────────────────────────────────────────────────
+    # Bridges the train/inference gap (exposure bias): after ss_start_epoch,
+    # the decoder is fed the model's own predictions instead of ground truth
+    # with linearly increasing probability, reaching ss_max_prob at the final epoch.
+    ss_start_epoch = 5    # epochs of pure teacher forcing before sampling begins
+    ss_max_prob    = 0.5  # peak probability of using model prediction as next input
 
     # ── Training ──────────────────────────────────────────────────────────────
     # Larger batch size than before because mixed precision halves GPU memory use.
@@ -129,7 +150,7 @@ class Config:
 
     # torch.compile gives ~20–40 % throughput improvement on PyTorch ≥ 2.0
     # with no code changes to the model itself.
-    compile_model     = True
+    compile_model     = False  # torch.compile requires Triton, which is Linux-only
 
     # ── Checkpointing ─────────────────────────────────────────────────────────
     checkpoint_path = "checkpoints/best_model.pt"

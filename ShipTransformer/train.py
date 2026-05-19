@@ -39,6 +39,33 @@ from model  import ShipTrajectoryTransformer
 from dataset import load_data
 from utils  import set_seed
 
+SEQ_DEC = cfg.seq_len_dec
+
+
+# ── Scheduled sampling ───────────────────────────────────────────────────────
+
+@torch.no_grad()
+def _build_scheduled_input(model, src, tgt, teacher_prob, use_amp):
+    """Build decoder input mixing ground truth and model predictions.
+
+    teacher_prob=1.0 → pure teacher forcing (same as normal training).
+    teacher_prob=0.5 → each decoder step independently uses the model's own
+                       prediction ~50% of the time, bridging the train/inference gap.
+
+    Runs without gradients; the returned tensor is detached so that the
+    subsequent forward pass (with grads) is the only differentiated call.
+    """
+    B, T, _ = tgt.shape
+    dec_input = src[:, -1:, :]          # seed: last encoder observation
+    for step in range(T - 1):
+        with torch.autocast(device_type=cfg.device, enabled=use_amp):
+            mu, _ = model(src, dec_input)
+        pred = mu[:, -1:, :].clamp(0.0, 1.0)  # clamp before feeding back
+        gt   = tgt[:, step:step+1, :]
+        mask = (torch.rand(B, 1, 1, device=src.device) < teacher_prob).to(pred.dtype)
+        dec_input = torch.cat([dec_input, mask * gt + (1 - mask) * pred], dim=1)
+    return dec_input.detach()
+
 
 # ── Loss ─────────────────────────────────────────────────────────────────────
 
@@ -87,6 +114,7 @@ def run_epoch(
     scaler,         # torch.cuda.amp.GradScaler (or None on CPU)
     scheduler,
     train: bool,
+    teacher_prob: float = 1.0,
 ) -> float:
     """
     One full pass over a DataLoader.
@@ -111,9 +139,12 @@ def run_epoch(
             src = src.to(cfg.device)
             tgt = tgt.to(cfg.device)
 
-            # Teacher-forcing decoder input: [last_past, future_0 … future_{N-2}]
-            last_past  = src[:, -1:, :]
-            tgt_input  = torch.cat([last_past, tgt[:, :-1, :]], dim=1)
+            # Build decoder input: pure teacher forcing, or scheduled sampling
+            if train and teacher_prob < 1.0:
+                tgt_input = _build_scheduled_input(model, src, tgt, teacher_prob, use_amp)
+            else:
+                last_past = src[:, -1:, :]
+                tgt_input = torch.cat([last_past, tgt[:, :-1, :]], dim=1)
 
             # ── Forward pass (with optional mixed precision) ───────────────
             with torch.autocast(device_type=cfg.device, enabled=use_amp):
@@ -169,8 +200,11 @@ def main():
     )
 
     # OneCycleLR: warm-up then cosine decay within each epoch.
-    # total_steps counts every optimiser step (accounting for accumulation).
-    total_steps = (len(train_loader) // cfg.grad_accumulation) * cfg.epochs
+    # total_steps counts every optimizer step (accounting for accumulation).
+    # Each epoch has ceil(batches / accumulation) optimizer steps.
+    # +1 buffer guards against an off-by-one when len(train_loader) is one
+    # fewer than the batches actually yielded (last partial batch edge case).
+    total_steps = ((len(train_loader) + cfg.grad_accumulation - 1) // cfg.grad_accumulation) * cfg.epochs + 1
     scheduler   = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
         max_lr          = cfg.lr,
@@ -190,15 +224,28 @@ def main():
 
     best_val_loss = float("inf")
 
+    ramp_epochs = max(1, cfg.epochs - cfg.ss_start_epoch)
+
     for epoch in range(1, cfg.epochs + 1):
-        train_loss = run_epoch(model, train_loader, optimizer, amp_scaler, scheduler, train=True)
-        val_loss   = run_epoch(model, val_loader,   optimizer, amp_scaler, scheduler, train=False)
+        # Linear ramp: pure teacher forcing until ss_start_epoch, then
+        # gradually increase the fraction of model-predicted decoder inputs.
+        if epoch <= cfg.ss_start_epoch:
+            teacher_prob = 1.0
+        else:
+            progress     = (epoch - cfg.ss_start_epoch) / ramp_epochs
+            teacher_prob = 1.0 - cfg.ss_max_prob * min(1.0, progress)
+
+        train_loss = run_epoch(model, train_loader, optimizer, amp_scaler, scheduler,
+                               train=True, teacher_prob=teacher_prob)
+        val_loss   = run_epoch(model, val_loader,   optimizer, amp_scaler, scheduler,
+                               train=False)
 
         if epoch % cfg.log_every == 0:
             print(
                 f"Epoch {epoch:3d}/{cfg.epochs}  "
                 f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
-                f"lr={scheduler.get_last_lr()[0]:.2e}"
+                f"lr={scheduler.get_last_lr()[0]:.2e}  "
+                f"teacher={teacher_prob:.2f}"
             )
 
         if val_loss < best_val_loss:
