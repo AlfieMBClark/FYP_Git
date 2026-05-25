@@ -158,6 +158,9 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
     L >= min_voyage_points.
     Pings outside the configured region_bounds are skipped; any resulting
     gaps are handled by the existing gap-splitting logic.
+
+    DT (7th feature) is the time in seconds since the previous ping within the
+    same gap-free segment.  The first ping of each segment gets DT = 0.
     """
     if not rows:
         return []
@@ -187,12 +190,13 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
     ts_arr   = np.array(timestamps, dtype=np.float64)
     feat_arr = np.array(features,   dtype=np.float32)
 
-    # Gap splitting
-    split_at = np.where(ts_arr[1:] - ts_arr[:-1] > cfg.gap_max_seconds)[0] + 1
-    segments = np.split(feat_arr, split_at)
+    # Gap splitting — keep ts_arr and feat_arr in sync
+    split_at  = np.where(ts_arr[1:] - ts_arr[:-1] > cfg.gap_max_seconds)[0] + 1
+    feat_segs = np.split(feat_arr, split_at)
+    ts_segs   = np.split(ts_arr,   split_at)
 
     voyages = []
-    for seg in segments:
+    for seg, ts_seg in zip(feat_segs, ts_segs):
         if len(seg) < cfg.min_voyage_points:
             continue
         sog_col = seg[:, 2]
@@ -200,7 +204,14 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
             continue
         if (sog_col < cfg.low_speed_threshold).mean() > cfg.low_speed_fraction:
             continue
-        voyages.append(normalize(seg))
+        # DT: seconds since previous ping; 0 for the first ping in the segment
+        dt = np.zeros(len(seg), dtype=np.float32)
+        dt[1:] = np.diff(ts_seg).astype(np.float32)
+        seg_with_dt = np.concatenate([seg, dt[:, np.newaxis]], axis=1)
+        normed = normalize(seg_with_dt)
+        if np.isnan(normed).any():
+            continue  # discard voyage segments containing NaN features
+        voyages.append(normed)
 
     return voyages
 

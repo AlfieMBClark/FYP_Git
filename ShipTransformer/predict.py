@@ -19,22 +19,30 @@ python predict.py --random --device cpu
 """
 import argparse, math, os, random, sqlite3, sys
 from collections import Counter
+from datetime import datetime, timezone
 import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import cfg
-from model import ShipTrajectoryTransformer
+from model  import ShipTrajectoryTransformer
 
-FEAT    = cfg.feature_cols
-NF      = cfg.n_features
+FEAT    = cfg.feature_cols     # 7 features stored per ping
+NF      = cfg.n_features       # 7
+N_ENC   = cfg.n_enc_features   # 7 — encoder receives all features
+N_DEC   = cfg.n_dec_features   # 5 — decoder outputs LAT, LON, SOG, COG_SIN, COG_COS
 SEQ_ENC = cfg.seq_len_enc
 SEQ_DEC = cfg.seq_len_dec
 WINDOW  = SEQ_ENC + SEQ_DEC
 
+# Normalisation arrays for the full 7-feature ping vector
 _LO  = np.array([cfg.norm_bounds[f][0] for f in FEAT], dtype=np.float32)
 _HI  = np.array([cfg.norm_bounds[f][1] for f in FEAT], dtype=np.float32)
 _RNG = _HI - _LO
+
+# Normalisation arrays for the 5 decoder output features (LAT…COG_COS)
+_DEC_LO  = _LO[:N_DEC]
+_DEC_RNG = _RNG[:N_DEC]
 
 # One distinct colour per vessel slot (up to 10)
 VESSEL_COLORS = [
@@ -67,29 +75,52 @@ def _haversine_km(lat1, lon1, lat2, lon2):
 
 
 def normalise(arr):
+    """Normalise a full NF-feature array to [0, 1]."""
     return np.clip((arr - _LO) / _RNG, 0.0, 1.0)
 
 
 def denormalise(arr):
+    """Denormalise a full NF-feature array from [0, 1] to physical units."""
     return np.clip(arr, 0.0, 1.0) * _RNG + _LO
 
 
+def denormalise_dec(arr):
+    """Denormalise a N_DEC-feature decoder prediction from [0, 1] to physical units."""
+    return np.clip(arr, 0.0, 1.0) * _DEC_RNG + _DEC_LO
+
+
 def load_model(checkpoint_path, device):
+    """Load model using architecture hyperparameters saved in the checkpoint.
+
+    Using the checkpoint's own config avoids an architecture mismatch when
+    cfg.py is updated between the training run and an inference run.
+    """
     ckpt  = torch.load(checkpoint_path, map_location=device, weights_only=False)
     state = ckpt["model_state"]
     state = {k.replace("_orig_mod.", ""): v for k, v in state.items()}
+
+    # Fall back to current cfg values for keys absent in older checkpoints
+    c = ckpt.get("config", {})
     model = ShipTrajectoryTransformer(
-        n_features=NF,
-        d_model=cfg.d_model,
-        num_heads=cfg.num_heads,
-        num_layers=cfg.num_layers,
-        d_ff=cfg.d_ff,
-        dropout=0.0,
-        max_seq_length=cfg.max_seq_length,
+        n_features     = c.get("n_features",     NF),
+        d_model        = c.get("d_model",        cfg.d_model),
+        num_heads      = c.get("num_heads",      cfg.num_heads),
+        num_layers     = c.get("num_layers",     cfg.num_layers),
+        d_ff           = c.get("d_ff",           cfg.d_ff),
+        dropout        = 0.0,
+        max_seq_length = c.get("max_seq_length", cfg.max_seq_length),
+        n_enc_features = c.get("n_enc_features", N_ENC),
+        n_dec_features = c.get("n_dec_features", N_DEC),
     ).to(device)
     model.load_state_dict(state)
     model.eval()
     return model
+
+
+_LAT_MIN, _LAT_MAX, _LON_MIN, _LON_MAX = cfg.region_bounds
+
+_REGION_SQL    = "LAT BETWEEN ? AND ? AND LON BETWEEN ? AND ?"
+_REGION_PARAMS = (_LAT_MIN, _LAT_MAX, _LON_MIN, _LON_MAX)
 
 
 def fetch_clean_track(db_path, mmsi):
@@ -101,13 +132,13 @@ def fetch_clean_track(db_path, mmsi):
     has_flags = "FLAGS" in cols
     if has_flags:
         cur.execute(
-            "SELECT * FROM ais WHERE MMSI=? AND FLAGS=0 ORDER BY TIMESTAMP",
-            (mmsi,),
+            f"SELECT * FROM ais WHERE MMSI=? AND FLAGS=0 AND {_REGION_SQL} ORDER BY TIMESTAMP",
+            (mmsi, *_REGION_PARAMS),
         )
     else:
         cur.execute(
-            "SELECT * FROM ais WHERE MMSI=? ORDER BY TIMESTAMP",
-            (mmsi,),
+            f"SELECT * FROM ais WHERE MMSI=? AND {_REGION_SQL} ORDER BY TIMESTAMP",
+            (mmsi, *_REGION_PARAMS),
         )
     rows = cur.fetchall()
     conn.close()
@@ -117,7 +148,10 @@ def fetch_clean_track(db_path, mmsi):
 def list_mmsis(db_path):
     conn  = sqlite3.connect(db_path)
     cur   = conn.cursor()
-    cur.execute("SELECT DISTINCT MMSI FROM ais")
+    cur.execute(
+        f"SELECT DISTINCT MMSI FROM ais WHERE {_REGION_SQL}",
+        _REGION_PARAMS,
+    )
     mmsis = [r[0] for r in cur.fetchall()]
     conn.close()
     return mmsis
@@ -127,12 +161,30 @@ def _cog_from_sincos(sin_val, cos_val):
     return math.degrees(math.atan2(float(sin_val), float(cos_val))) % 360
 
 
+def _parse_ts(ts_str) -> float:
+    try:
+        return datetime.strptime(str(ts_str), "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=timezone.utc
+        ).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def rows_to_array(rows):
-    group = _dominant_group(rows)
-    out   = []
+    """Convert DB rows to a normalised (N, NF) array including the DT feature."""
+    group  = _dominant_group(rows)
+    out    = []
+    prev_t = None
     for r in rows:
         cog_rad = math.radians(r["COG"])
-        out.append([r["LAT"], r["LON"], r["SOG"], math.sin(cog_rad), math.cos(cog_rad), float(group)])
+        t  = _parse_ts(r["TIMESTAMP"])
+        dt = 0.0 if prev_t is None else max(0.0, t - prev_t)
+        prev_t = t
+        out.append([
+            r["LAT"], r["LON"], r["SOG"],
+            math.sin(cog_rad), math.cos(cog_rad),
+            float(group), dt,
+        ])
     return normalise(np.array(out, dtype=np.float32))
 
 
@@ -147,32 +199,59 @@ def extract_windows(track_norm):
 
 @torch.no_grad()
 def predict_autoregressive(model, src_np, device):
-    src       = torch.from_numpy(src_np).unsqueeze(0).to(device)
-    dec_input = src[:, -1:, :]
+    """Autoregressive decode for SEQ_DEC steps.
+
+    Fixes vs. the previous version
+    --------------------------------
+    1. Decoder input/output is N_DEC features (LAT, LON, SOG, COG_SIN, COG_COS).
+       SHIP_TYPE is kept in the encoder only — it cannot drift because it is
+       never in the decoder prediction.
+
+    2. Predicted COG_SIN / COG_COS are renormalised to the unit circle before
+       being fed back as the next step's decoder input.  Without this, repeated
+       floating-point accumulation drifts the heading off the unit circle.
+    """
+    src       = torch.from_numpy(src_np).unsqueeze(0).to(device)   # (1, SEQ_ENC, N_ENC)
+    dec_input = src[:, -1:, :N_DEC]                                  # (1, 1, N_DEC)
     mu_steps, sigma_steps = [], []
+
     for _ in range(SEQ_DEC):
         mu, log_var = model(src, dec_input)
-        mu_last  = mu[:, -1:, :]
+        mu_last  = mu[:, -1:, :]                                     # (1, 1, N_DEC)
         std_last = (log_var[:, -1:, :] * 0.5).exp()
+
+        # Clamp to valid normalised range then fix COG unit circle
+        next_step = mu_last.clamp(0.0, 1.0).clone()
+        sin_raw   = next_step[:, :, 3] * 2.0 - 1.0
+        cos_raw   = next_step[:, :, 4] * 2.0 - 1.0
+        mag       = (sin_raw.pow(2) + cos_raw.pow(2)).sqrt().clamp(min=1e-8)
+        next_step[:, :, 3] = (sin_raw / mag + 1.0) * 0.5
+        next_step[:, :, 4] = (cos_raw / mag + 1.0) * 0.5
+
         mu_steps.append(mu_last.squeeze(0).cpu().numpy())
         sigma_steps.append(std_last.squeeze(0).cpu().numpy())
-        # Clamp to valid normalised range before feeding back as next decoder input.
-        # The linear output head is unclamped — values outside [0,1] compound each
-        # autoregressive step and denormalise to impossible lat/lon coordinates.
-        dec_input = torch.cat([dec_input, mu_last.clamp(0.0, 1.0)], dim=1)
+        dec_input = torch.cat([dec_input, next_step], dim=1)
+
     return np.concatenate(mu_steps, axis=0), np.concatenate(sigma_steps, axis=0)
 
 
-def _z_score(actual_norm, mu_pred, sigma_pred):
-    return (np.abs(actual_norm - mu_pred) / (sigma_pred + 1e-8)).mean(axis=1)
+def _z_score(actual_norm_dec, mu_pred, sigma_pred):
+    """Mean absolute z-score per timestep.
+
+    actual_norm_dec : (T, N_DEC)  — first N_DEC features of the actual window
+    mu_pred         : (T, N_DEC)
+    sigma_pred      : (T, N_DEC)
+    """
+    return (np.abs(actual_norm_dec - mu_pred) / (sigma_pred + 1e-8)).mean(axis=1)
 
 
+def print_window_result(dec_actual_norm, mu_pred, sigma_pred, threshold):
+    # dec_actual_norm has NF features; predictions have N_DEC features
+    dec_actual_raw = denormalise(dec_actual_norm)          # (T, NF)
+    dec_pred_raw   = denormalise_dec(mu_pred)              # (T, N_DEC)
+    dec_sigma_raw  = sigma_pred * _DEC_RNG                 # (T, N_DEC) in physical units
+    z              = _z_score(dec_actual_norm[:, :N_DEC], mu_pred, sigma_pred)
 
-def print_window_result(enc_actual_raw, dec_actual_norm, mu_pred, sigma_pred, threshold):
-    dec_actual_raw = denormalise(dec_actual_norm)
-    dec_pred_raw   = denormalise(mu_pred)
-    dec_sigma_raw  = sigma_pred * _RNG
-    z              = _z_score(dec_actual_norm, mu_pred, sigma_pred)
     hdr = ("Step   Act LAT    Act LON    Pred LAT   Pred LON"
            "  Sigma LAT  Sigma LON  Dist km  z-score  Flag")
     print(hdr)
@@ -198,22 +277,20 @@ def print_window_result(enc_actual_raw, dec_actual_norm, mu_pred, sigma_pred, th
 
 def _add_vessel_to_map(m, full_track_raw, enc_actual_raw, dec_actual_norm, mu_pred, mmsi, color):
     """Add one vessel's tracks and markers to an existing folium map."""
-    import folium
+    import folium  # type: ignore[import-untyped]
 
-    dec_actual_raw = denormalise(dec_actual_norm)
-    dec_pred_raw   = denormalise(mu_pred)
+    dec_actual_raw = denormalise(dec_actual_norm)   # (T, NF)
+    dec_pred_raw   = denormalise_dec(mu_pred)        # (T, N_DEC)
 
     def coords(arr):
         return [[float(r[0]), float(r[1])] for r in arr]
 
-    # Full vessel history (grey, faint)
     folium.PolyLine(
         coords(full_track_raw),
         color="grey", weight=1.5, opacity=0.35,
         tooltip=f"MMSI {mmsi} — history",
     ).add_to(m)
 
-    # Encoder input (vessel colour, solid)
     folium.PolyLine(
         coords(enc_actual_raw),
         color=color, weight=3, opacity=0.9,
@@ -227,8 +304,7 @@ def _add_vessel_to_map(m, full_track_raw, enc_actual_raw, dec_actual_norm, mu_pr
                     f"<br>SOG {row[2]:.1f} kn  COG {_cog_from_sincos(row[3], row[4]):.0f}°",
         ).add_to(m)
 
-    # Predicted future (vessel colour, dashed)
-    last_enc = enc_actual_raw[-1:]
+    last_enc   = enc_actual_raw[-1:]
     pred_route = [coords([last_enc[0]])[0]] + coords(dec_pred_raw)
 
     folium.PolyLine(
@@ -252,7 +328,6 @@ def _add_vessel_to_map(m, full_track_raw, enc_actual_raw, dec_actual_norm, mu_pr
                      f"Error vs actual: {dist:.3f} km"),
         ).add_to(m)
 
-    # Actual future (vessel colour, dotted)
     actual_route = [coords([last_enc[0]])[0]] + coords(dec_actual_raw)
 
     folium.PolyLine(
@@ -276,7 +351,6 @@ def _add_vessel_to_map(m, full_track_raw, enc_actual_raw, dec_actual_norm, mu_pr
                      f"Error vs predicted: {dist:.3f} km"),
         ).add_to(m)
 
-    # Start / end markers
     folium.CircleMarker(
         location=[float(enc_actual_raw[0, 0]), float(enc_actual_raw[0, 1])],
         radius=8, color=color, fill=True, fill_color=color, fill_opacity=1.0,
@@ -300,19 +374,14 @@ def save_folium_map(vessels, out_path):
     vessels: list of (full_track_raw, enc_actual_raw, dec_actual_norm, mu_pred, mmsi)
     """
     try:
-        import folium
+        import folium  # type: ignore[import-untyped]
     except ImportError:
         print("folium not installed -- run: pip install folium")
         return
 
-    m = folium.Map(
-        location=[42, 20],
-        zoom_start=4,
-        tiles="OpenStreetMap",
-    )
+    m = folium.Map(location=[42, 20], zoom_start=4, tiles="OpenStreetMap")
     m.fit_bounds(_REGION_BOUNDS)
 
-    # Legend HTML
     legend_items = ""
     for i, (_, _, _, _, mmsi) in enumerate(vessels):
         color = VESSEL_COLORS[i % len(VESSEL_COLORS)]
@@ -351,9 +420,9 @@ def save_plot(enc_actual_raw, dec_actual_norm, mu_pred, sigma_pred, mmsi, out_pa
     except ImportError:
         print("matplotlib not installed -- skipping plot.")
         return
-    dec_actual_raw = denormalise(dec_actual_norm)
-    dec_pred_raw   = denormalise(mu_pred)
-    dec_sigma_raw  = sigma_pred * _RNG
+    dec_actual_raw = denormalise(dec_actual_norm)     # (T, NF)
+    dec_pred_raw   = denormalise_dec(mu_pred)          # (T, N_DEC)
+    dec_sigma_raw  = sigma_pred * _DEC_RNG
     fig, ax = plt.subplots(figsize=(10, 7))
     ax.plot(enc_actual_raw[:, 1], enc_actual_raw[:, 0],
             "b-o", ms=3, lw=1.5, label="Encoder (actual)", zorder=3)
@@ -401,7 +470,7 @@ def _process_vessel(mmsi, args, model):
     print(f"\n{'='*60}")
     print(f"  MMSI {mmsi}  |  {len(rows)} pings  |  {len(windows)} windows")
 
-    w_idx      = args.window
+    w_idx = args.window
     if w_idx >= len(windows):
         w_idx = 0
     enc, dec   = windows[w_idx]
@@ -413,7 +482,7 @@ def _process_vessel(mmsi, args, model):
     enc_raw        = denormalise(enc)
     full_track_raw = denormalise(track_norm)
 
-    print_window_result(enc_raw, dec, mu_pred, sigma_pred, args.anomaly_threshold)
+    print_window_result(dec, mu_pred, sigma_pred, args.anomaly_threshold)
 
     return (full_track_raw, enc_raw, dec, mu_pred, mmsi)
 
@@ -490,9 +559,9 @@ def main():
         total_steps = flagged_tot = 0
         for wi, (enc, dec) in enumerate(windows):
             mu_pred, sigma_pred = predict_autoregressive(model, enc, args.device)
-            z        = _z_score(dec, mu_pred, sigma_pred)
+            z        = _z_score(dec[:, :N_DEC], mu_pred, sigma_pred)
             dec_raw  = denormalise(dec)
-            pred_raw = denormalise(mu_pred)
+            pred_raw = denormalise_dec(mu_pred)
             for i in range(SEQ_DEC):
                 dist         = _haversine_km(
                     dec_raw[i, 0], dec_raw[i, 1],
@@ -527,7 +596,7 @@ def main():
     enc_raw        = denormalise(enc)
     full_track_raw = denormalise(track_norm)
 
-    print_window_result(enc_raw, dec, mu_pred, sigma_pred, args.anomaly_threshold)
+    print_window_result(dec, mu_pred, sigma_pred, args.anomaly_threshold)
 
     save_folium_map([(full_track_raw, enc_raw, dec, mu_pred, args.mmsi)], "prediction.html")
 

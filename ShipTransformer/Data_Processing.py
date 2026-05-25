@@ -326,8 +326,13 @@ def _dma_worker(task: tuple):
 
 
 def run_dma_phase(conn, args) -> int:
-    p = Path(args.dma)
-    files = [str(p)] if p.is_file() else sorted(str(f) for f in p.rglob("*.zip"))
+    files = []
+    for dma_path in args.dma:
+        p = Path(dma_path)
+        if p.is_file():
+            files.append(str(p))
+        else:
+            files.extend(sorted(str(f) for f in p.rglob("*.zip")))
     if args.limit:
         files = files[:args.limit]
     if not files:
@@ -605,18 +610,22 @@ def split_and_filter(rows) -> list:
             lon = float(row[2])
             if not (_RB_LAT_MIN <= lat <= _RB_LAT_MAX and _RB_LON_MIN <= lon <= _RB_LON_MAX):
                 continue
+            cog_rad = math.radians(float(row[4]))
             timestamps.append(ts_to_unix(row[0]))
             features.append([lat, lon, float(row[3]),
-                              float(row[4]), float(_itu_to_group(int(row[5])))])
+                              math.sin(cog_rad), math.cos(cog_rad),
+                              float(_itu_to_group(int(row[5])))])
         except (ValueError, TypeError):
             continue
     if len(features) < cfg.min_voyage_points:
         return []
     ts_arr   = np.array(timestamps, dtype=np.float64)
     feat_arr = np.array(features,   dtype=np.float32)
-    split_at = np.where(ts_arr[1:] - ts_arr[:-1] > cfg.gap_max_seconds)[0] + 1
+    split_at  = np.where(ts_arr[1:] - ts_arr[:-1] > cfg.gap_max_seconds)[0] + 1
+    feat_segs = np.split(feat_arr, split_at)
+    ts_segs   = np.split(ts_arr,   split_at)
     voyages = []
-    for seg in np.split(feat_arr, split_at):
+    for seg, ts_seg in zip(feat_segs, ts_segs):
         if len(seg) < cfg.min_voyage_points:
             continue
         sog = seg[:, 2]
@@ -624,7 +633,13 @@ def split_and_filter(rows) -> list:
             continue
         if (sog < cfg.low_speed_threshold).mean() > cfg.low_speed_fraction:
             continue
-        voyages.append(normalize(seg))
+        dt = np.zeros(len(seg), dtype=np.float32)
+        dt[1:] = np.diff(ts_seg).astype(np.float32)
+        seg_with_dt = np.concatenate([seg, dt[:, np.newaxis]], axis=1)
+        normed = normalize(seg_with_dt)
+        if np.isnan(normed).any():
+            continue
+        voyages.append(normed)
     return voyages
 
 def count_windows(voyages) -> int:
@@ -781,8 +796,9 @@ def main():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--dma",   default=None,
-                        help="Path to DMA zip directory (training source).")
+    parser.add_argument("--dma",   default=None, nargs="+",
+                        help="One or more DMA zip directories (training source). "
+                             "E.g. --dma path/2024 path/2025")
     parser.add_argument("--jsonl", default=None,
                         help="Path to WorldwideAIS .jsonl.gz directory (test source).")
     parser.add_argument("--dma-output",   default=cfg.train_db_path, dest="dma_output",
@@ -821,6 +837,8 @@ def main():
     if args.min_interval is None:
         args.min_interval = 0 if args.sample_rate < 1.0 else 60
 
+    dma_dirs = ", ".join(args.dma) if args.dma else "none"
+    print(f"DMA sources  : {dma_dirs}")
     print(f"Train DB     : {args.dma_output}  (DMA → training windows)")
     print(f"Test DB      : {args.jsonl_output}  (WorldwideAIS → predict.py evaluation)")
     print(f"Out dir      : {args.out_dir}")
