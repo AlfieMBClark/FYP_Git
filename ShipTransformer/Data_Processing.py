@@ -4,17 +4,21 @@ Data_Processing.py
 End-to-end pipeline: converts raw AIS data from both sources into a single
 SQLite database, then preprocesses it into memory-mapped training windows.
 
-Usage — full pipeline:
+Usage — full pipeline (ingest both sources + build training windows):
+    python Data_Processing.py --dma "/home/tclark/alfie/DMA/downloads/2024" "/home/tclark/alfie/DMA/downloads/2025" --jsonl "/home/tclark/alfie/Worldwide AIS Network" --dma-output data/dma.db --jsonl-output data/worldwide.db --out-dir data/
+
+Usage — DMA only (no WorldwideAIS, still builds training windows):
     python Data_Processing.py \
-        --dma   "C:/TriAIS/DMA/downloads/2024" \
-        --jsonl "C:/TriAIS/Worldwide AIS Network" \
-        --output data/ais.db --out-dir data/
+        --dma "/home/tclark/alfie/DMA/downloads/2024" "/home/tclark/alfie/DMA/downloads/2025" \
+        --dma-output data/dma.db --out-dir data/
 
-Usage — conversion only (skip prepare step):
-    python Data_Processing.py --dma ... --jsonl ... --output data/ais.db --db-only
+Usage — ingestion only (skip window preparation):
+    python Data_Processing.py \
+        --dma "/home/tclark/alfie/DMA/downloads/2024" \
+        --dma-output data/dma.db --db-only
 
-Usage — prepare only (DB already exists):
-    python Data_Processing.py --output data/ais.db --out-dir data/ --prepare-only
+Usage — prepare windows only (DBs already built):
+    python Data_Processing.py --prepare-only --dma-output data/dma.db --out-dir data/
 
 Speed & size options:
     --sample-rate 0.1   Keep only this fraction of vessels (default 1.0 = all).
@@ -54,12 +58,9 @@ import signal
 import sqlite3
 import sys
 import zipfile
-from collections import Counter
 from datetime import datetime, timezone
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-
-import numpy as np
 
 from config import cfg
 
@@ -544,234 +545,10 @@ def run_jsonl_phase(conn, args) -> int:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Phase 3 — Prepare dataset
+# Phase 3 — Prepare dataset  (delegated to prepare_dataset.py)
 # ══════════════════════════════════════════════════════════════════════════════
 
-WINDOW_LEN  = cfg.seq_len_enc + cfg.seq_len_dec
-FEAT_COLS   = cfg.feature_cols
-N_FEATURES  = cfg.n_features
-NORM_BOUNDS = cfg.norm_bounds
-
-_NORM_LO  = np.array([NORM_BOUNDS[c][0] for c in FEAT_COLS], dtype=np.float32)
-_NORM_HI  = np.array([NORM_BOUNDS[c][1] for c in FEAT_COLS], dtype=np.float32)
-_NORM_RNG = _NORM_HI - _NORM_LO
-
-GROUP_NAMES = [
-    "Unknown", "Cargo", "Tanker", "Passenger",
-    "Fishing", "Tug/Service", "Pleasure/Sail", "Other",
-]
-N_GROUPS = len(GROUP_NAMES)
-
-
-def _itu_to_group(code: int) -> int:
-    return cfg.ship_type_groups.get(code, 7)
-
-def _dominant_group(rows) -> int:
-    counts = Counter(_itu_to_group(int(r[5])) for r in rows if int(r[5]) != 0)
-    return counts.most_common(1)[0][0] if counts else 0
-
-def ts_to_unix(ts_str: str) -> float:
-    return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S").replace(
-        tzinfo=timezone.utc
-    ).timestamp()
-
-def normalize(arr: np.ndarray) -> np.ndarray:
-    return np.clip((arr - _NORM_LO) / _NORM_RNG, 0.0, 1.0)
-
-def has_flags_column(conn: sqlite3.Connection) -> bool:
-    return "FLAGS" in {r[1] for r in conn.execute("PRAGMA table_info(ais)")}
-
-def fetch_mmsi_track(conn, mmsi, use_flags) -> list:
-    if use_flags and cfg.clean_flags_only:
-        q = ("SELECT TIMESTAMP,LAT,LON,SOG,COG,SHIP_TYPE "
-             "FROM ais WHERE MMSI=? AND FLAGS=0 ORDER BY TIMESTAMP")
-    else:
-        q = ("SELECT TIMESTAMP,LAT,LON,SOG,COG,SHIP_TYPE "
-             "FROM ais WHERE MMSI=? ORDER BY TIMESTAMP")
-    return conn.execute(q, (mmsi,)).fetchall()
-
-def fetch_mmsi_track_anomalous(conn, mmsi) -> list:
-    return conn.execute(
-        "SELECT TIMESTAMP,LAT,LON,SOG,COG,SHIP_TYPE "
-        "FROM ais WHERE MMSI=? AND FLAGS!=0 ORDER BY TIMESTAMP",
-        (mmsi,),
-    ).fetchall()
-
-_RB_LAT_MIN, _RB_LAT_MAX, _RB_LON_MIN, _RB_LON_MAX = cfg.region_bounds
-
-
-def split_and_filter(rows) -> list:
-    if not rows:
-        return []
-    timestamps, features = [], []
-    for row in rows:
-        try:
-            lat = float(row[1])
-            lon = float(row[2])
-            if not (_RB_LAT_MIN <= lat <= _RB_LAT_MAX and _RB_LON_MIN <= lon <= _RB_LON_MAX):
-                continue
-            cog_rad = math.radians(float(row[4]))
-            timestamps.append(ts_to_unix(row[0]))
-            features.append([lat, lon, float(row[3]),
-                              math.sin(cog_rad), math.cos(cog_rad),
-                              float(_itu_to_group(int(row[5])))])
-        except (ValueError, TypeError):
-            continue
-    if len(features) < cfg.min_voyage_points:
-        return []
-    ts_arr   = np.array(timestamps, dtype=np.float64)
-    feat_arr = np.array(features,   dtype=np.float32)
-    split_at  = np.where(ts_arr[1:] - ts_arr[:-1] > cfg.gap_max_seconds)[0] + 1
-    feat_segs = np.split(feat_arr, split_at)
-    ts_segs   = np.split(ts_arr,   split_at)
-    voyages = []
-    for seg, ts_seg in zip(feat_segs, ts_segs):
-        if len(seg) < cfg.min_voyage_points:
-            continue
-        sog = seg[:, 2]
-        if sog.max() < cfg.max_sog_minimum:
-            continue
-        if (sog < cfg.low_speed_threshold).mean() > cfg.low_speed_fraction:
-            continue
-        dt = np.zeros(len(seg), dtype=np.float32)
-        dt[1:] = np.diff(ts_seg).astype(np.float32)
-        seg_with_dt = np.concatenate([seg, dt[:, np.newaxis]], axis=1)
-        normed = normalize(seg_with_dt)
-        if np.isnan(normed).any():
-            continue
-        voyages.append(normed)
-    return voyages
-
-def count_windows(voyages) -> int:
-    return sum((len(v) - WINDOW_LEN) // cfg.window_stride + 1
-               for v in voyages if len(v) >= WINDOW_LEN)
-
-def _write_mmsi_windows(fp, idx, voyages, max_w) -> int:
-    written = 0
-    for v in voyages:
-        for start in range(0, len(v) - WINDOW_LEN + 1, cfg.window_stride):
-            if written >= max_w:
-                return written
-            fp[idx + written] = v[start : start + WINDOW_LEN]
-            written += 1
-    return written
-
-def process_split(conn, mmsis, use_flags, bin_path, label) -> int:
-    print(f"  [{label}] Pass 1: counting windows across {len(mmsis):,} ships ...")
-    group_remaining = {g: cfg.max_windows_per_type_group for g in range(N_GROUPS)}
-    group_counts    = {g: 0 for g in range(N_GROUPS)}
-    total = 0
-    for mmsi in mmsis:
-        rows    = fetch_mmsi_track(conn, mmsi, use_flags)
-        voyages = split_and_filter(rows)
-        tg      = _dominant_group(rows)
-        n       = min(count_windows(voyages), cfg.max_windows_per_mmsi, group_remaining[tg])
-        group_remaining[tg] -= n
-        group_counts[tg]    += n
-        total               += n
-
-    gb = total * WINDOW_LEN * N_FEATURES * 4 / 1e9
-    print(f"  [{label}] {total:,} windows ({gb:.2f} GB)")
-    print(f"  [{label}] Type-group breakdown:")
-    for g, name in enumerate(GROUP_NAMES):
-        cap = "  *** capped ***" if group_remaining[g] == 0 else ""
-        print(f"             {name:16s}: {group_counts[g]:>8,}{cap}")
-
-    if total == 0:
-        print(f"  [{label}] WARNING: no windows — check filters.")
-        return 0
-
-    Path(bin_path).parent.mkdir(parents=True, exist_ok=True)
-    fp = np.memmap(bin_path, dtype="float32", mode="w+",
-                   shape=(total, WINDOW_LEN, N_FEATURES))
-
-    print(f"  [{label}] Pass 2: writing windows ...")
-    group_remaining = {g: cfg.max_windows_per_type_group for g in range(N_GROUPS)}
-    idx = 0
-    for mmsi in mmsis:
-        rows    = fetch_mmsi_track(conn, mmsi, use_flags)
-        voyages = split_and_filter(rows)
-        tg      = _dominant_group(rows)
-        max_w   = min(cfg.max_windows_per_mmsi, group_remaining[tg])
-        written = _write_mmsi_windows(fp, idx, voyages, max_w)
-        group_remaining[tg] -= written
-        idx += written
-
-    del fp
-    print(f"  [{label}] Done — {idx:,} windows written to {bin_path}")
-    return idx
-
-def build_anomaly_set(conn, mmsis, bin_path) -> int:
-    print("  [anomaly] Pass 1: counting anomalous windows ...")
-    total = sum(count_windows(split_and_filter(fetch_mmsi_track_anomalous(conn, m))) for m in mmsis)
-    if total == 0:
-        print("  [anomaly] No anomalous windows found.")
-        return 0
-    print(f"  [anomaly] {total:,} anomalous windows")
-    Path(bin_path).parent.mkdir(parents=True, exist_ok=True)
-    fp = np.memmap(bin_path, dtype="float32", mode="w+",
-                   shape=(total, WINDOW_LEN, N_FEATURES))
-    print("  [anomaly] Pass 2: writing ...")
-    idx = 0
-    for mmsi in mmsis:
-        for v in split_and_filter(fetch_mmsi_track_anomalous(conn, mmsi)):
-            for start in range(0, len(v) - WINDOW_LEN + 1, cfg.window_stride):
-                fp[idx] = v[start : start + WINDOW_LEN]
-                idx += 1
-    del fp
-    print(f"  [anomaly] Done — {idx:,} windows written to {bin_path}")
-    return idx
-
-def run_prepare_phase(db_path, out_dir) -> dict:
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    train_path   = str(out / "train_windows.bin")
-    val_path     = str(out / "val_windows.bin")
-    test_path    = str(out / "test_windows.bin")
-    anomaly_path = str(out / "anomaly_windows.bin")
-    meta_path    = str(out / "dataset_meta.json")
-
-    print(f"  Window   : {WINDOW_LEN} steps ({cfg.seq_len_enc} enc + {cfg.seq_len_dec} dec)")
-    print(f"  Stride   : {cfg.window_stride}")
-    print(f"  MMSI cap : {cfg.max_windows_per_mmsi} windows/vessel")
-    print(f"  Group cap: {cfg.max_windows_per_type_group:,} windows/type-group\n")
-
-    with sqlite3.connect(db_path) as conn:
-        use_flags = has_flags_column(conn)
-        flag_note = ("FLAGS=0 only" if cfg.clean_flags_only else "all FLAGS") if use_flags else "none"
-        print(f"  FLAGS column: {'present' if use_flags else 'absent'} — using {flag_note} rows\n")
-        all_mmsis = np.array([r[0] for r in conn.execute("SELECT DISTINCT MMSI FROM ais ORDER BY MMSI")])
-
-    print(f"  Total MMSIs: {len(all_mmsis):,}")
-    np.random.default_rng(seed=42).shuffle(all_mmsis)
-    n_train = int(len(all_mmsis) * cfg.train_split)
-    n_val   = int(len(all_mmsis) * cfg.val_split)
-    train_mmsis = all_mmsis[:n_train].tolist()
-    val_mmsis   = all_mmsis[n_train : n_train + n_val].tolist()
-    test_mmsis  = all_mmsis[n_train + n_val :].tolist()
-    print(f"  MMSI split — train:{len(train_mmsis):,}  val:{len(val_mmsis):,}  test:{len(test_mmsis):,}\n")
-
-    with sqlite3.connect(db_path) as conn:
-        n_train_w   = process_split(conn, train_mmsis, use_flags, train_path,   "train")
-        print()
-        n_val_w     = process_split(conn, val_mmsis,   use_flags, val_path,     "val")
-        print()
-        n_test_w    = process_split(conn, test_mmsis,  use_flags, test_path,    "test")
-        print()
-        n_anomaly_w = build_anomaly_set(conn, test_mmsis, anomaly_path) if use_flags else 0
-
-    meta = {
-        "window_len": WINDOW_LEN, "n_features": N_FEATURES, "feature_cols": FEAT_COLS,
-        "norm_bounds": {k: list(v) for k, v in NORM_BOUNDS.items()},
-        "seq_len_enc": cfg.seq_len_enc, "seq_len_dec": cfg.seq_len_dec,
-        "n_train": n_train_w, "n_val": n_val_w, "n_test": n_test_w, "n_anomaly": n_anomaly_w,
-        "ship_type_groups": {str(k): v for k, v in cfg.ship_type_groups.items()},
-        "group_names": GROUP_NAMES,
-    }
-    with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
-    return {"n_train": n_train_w, "n_val": n_val_w, "n_test": n_test_w,
-            "n_anomaly": n_anomaly_w, "meta_path": meta_path}
+from prepare_dataset import run_prepare_phase  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════════════

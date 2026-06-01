@@ -32,7 +32,7 @@ class Config:
     val_split   = 0.10
 
     # ── Geographic region filter ──────────────────────────────────────────────
-    region_bounds = (10.0, 75.0, -30.0, 65.0)
+    region_bounds = (50.0, 66.0, -5.0, 20.0)
 
     # ── Track-level filters (applied in prepare_dataset.py) ───────────────────
     gap_max_seconds     = 7_200   # 2 hours
@@ -60,23 +60,23 @@ class Config:
     }
 
     # ── Features ──────────────────────────────────────────────────────────────
-    # Encoder sees all 7 features (including SHIP_TYPE as context and DT for
-    # temporal irregularity).  The decoder only predicts the 5 dynamic movement
-    # features; SHIP_TYPE is held constant as context and DT is encoder-only.
-    feature_cols   = ["LAT", "LON", "SOG", "COG_SIN", "COG_COS", "SHIP_TYPE", "DT"]
-    n_features     = 7      # total features stored per ping in .bin files
-    n_enc_features = 7      # encoder input: full feature set
-    n_dec_features = 5      # decoder input/output: LAT, LON, SOG, COG_SIN, COG_COS only
+    # DT is placed before SHIP_TYPE so the decoder input slice [:N_DEC_IN]
+    # naturally captures [LAT, LON, SOG, COG_SIN, COG_COS, DT] without SHIP_TYPE.
+    feature_cols         = ["LAT", "LON", "SOG", "COG_SIN", "COG_COS", "DT", "SHIP_TYPE"]
+    n_features           = 7   # total features stored per ping in .bin files
+    n_enc_features       = 7   # encoder input: full feature set
+    n_dec_features       = 5   # decoder output: LAT, LON, SOG, COG_SIN, COG_COS
+    n_dec_input_features = 6   # decoder input: adds DT (index 5); SHIP_TYPE stays encoder-only
 
     # ── Normalisation (fixed physical bounds — no fitting pass needed) ─────────
     norm_bounds = {
-        "LAT":       (-90.0,   90.0),
-        "LON":      (-180.0,  180.0),
+        "LAT":       (50.0,   66.0),   # Danish/North Sea actual range
+        "LON":       (-5.0,   20.0),   # Danish/North Sea actual range
         "SOG":        (0.0,    30.0),
         "COG_SIN":   (-1.0,    1.0),
         "COG_COS":   (-1.0,    1.0),
         "SHIP_TYPE":  (0.0,    7.0),
-        "DT":         (0.0, 3600.0),   # seconds since previous ping; first ping = 0
+        "DT":         (0.0, 7200.0),   # seconds since previous ping; first ping = 0 (matches gap_max_seconds)
     }
 
     # ── Loss ──────────────────────────────────────────────────────────────────
@@ -97,13 +97,13 @@ class Config:
     # Bridges the train/inference gap (exposure bias): after ss_start_epoch,
     # the decoder is fed the model's own predictions instead of ground truth
     # with linearly increasing probability, reaching ss_max_prob at the final epoch.
-    ss_start_epoch = 2    # epochs of pure teacher forcing before sampling begins
-    ss_max_prob    = 0.8  # peak probability of using model prediction as next input
+    ss_start_epoch = 5    # epochs of pure teacher forcing before sampling begins
+    ss_max_prob    = 0.5  # peak probability of using model prediction as next input
 
     # ── Training ──────────────────────────────────────────────────────────────
     batch_size        = 256
     lr                = 1e-3
-    epochs            = 20
+    epochs            = 40
     num_workers       = 4
     grad_clip         = 1.0
     grad_accumulation = 4

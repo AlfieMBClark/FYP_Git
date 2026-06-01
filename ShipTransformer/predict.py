@@ -1,21 +1,31 @@
 """
-# Random vessel, window 0, show map + table
+predict.py — inference and anomaly scoring against a SQLite AIS database.
+
+Usage
+-----
+# Random vessel from the default test DB (data/worldwide.db)
 python predict.py --random
+
+#vessel from 2023.db
+python predict.py --random --count 5 --db data2/2023.db
 
 # 10 random vessels on one map
 python predict.py --random --count 10
 
-# Specific vessel, window 5, with z-score threshold 2.0 for flagging
+# Specific vessel, window 5, flag if z-score exceeds 2.0
 python predict.py --mmsi 219123456 --window 5 --anomaly-threshold 2.0
 
-# Aggregate stats across all windows for a vessel
+# All windows for a vessel (aggregate ADE/FDE stats)
 python predict.py --mmsi 219123456 --all-windows
 
-# With matplotlib PNG plot too
+# Save a matplotlib PNG alongside the terminal output
 python predict.py --random --plot --plot-out my_plot.png
 
-# Use CPU instead of GPU
-python predict.py --random --device cpu
+# Run against the DMA training DB instead of WorldwideAIS
+python predict.py --random --db data/dma.db
+
+# Use a specific checkpoint and run on CPU
+python predict.py --random --checkpoint checkpoints/best_model.pt --device cpu
 """
 import argparse, math, os, random, sqlite3, sys
 from collections import Counter
@@ -27,13 +37,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import cfg
 from model  import ShipTrajectoryTransformer
 
-FEAT    = cfg.feature_cols     # 7 features stored per ping
-NF      = cfg.n_features       # 7
-N_ENC   = cfg.n_enc_features   # 7 — encoder receives all features
-N_DEC   = cfg.n_dec_features   # 5 — decoder outputs LAT, LON, SOG, COG_SIN, COG_COS
-SEQ_ENC = cfg.seq_len_enc
-SEQ_DEC = cfg.seq_len_dec
-WINDOW  = SEQ_ENC + SEQ_DEC
+FEAT     = cfg.feature_cols          # ["LAT","LON","SOG","COG_SIN","COG_COS","DT","SHIP_TYPE"]
+NF       = cfg.n_features            # 7
+N_ENC    = cfg.n_enc_features        # 7 — encoder receives all features
+N_DEC    = cfg.n_dec_features        # 5 — decoder outputs LAT, LON, SOG, COG_SIN, COG_COS
+N_DEC_IN = cfg.n_dec_input_features  # 6 — decoder input: motion + DT (index 5)
+SEQ_ENC  = cfg.seq_len_enc
+SEQ_DEC  = cfg.seq_len_dec
+WINDOW   = SEQ_ENC + SEQ_DEC
 
 # Normalisation arrays for the full 7-feature ping vector
 _LO  = np.array([cfg.norm_bounds[f][0] for f in FEAT], dtype=np.float32)
@@ -102,15 +113,16 @@ def load_model(checkpoint_path, device):
     # Fall back to current cfg values for keys absent in older checkpoints
     c = ckpt.get("config", {})
     model = ShipTrajectoryTransformer(
-        n_features     = c.get("n_features",     NF),
-        d_model        = c.get("d_model",        cfg.d_model),
-        num_heads      = c.get("num_heads",      cfg.num_heads),
-        num_layers     = c.get("num_layers",     cfg.num_layers),
-        d_ff           = c.get("d_ff",           cfg.d_ff),
-        dropout        = 0.0,
-        max_seq_length = c.get("max_seq_length", cfg.max_seq_length),
-        n_enc_features = c.get("n_enc_features", N_ENC),
-        n_dec_features = c.get("n_dec_features", N_DEC),
+        n_features           = c.get("n_features",          NF),
+        d_model              = c.get("d_model",             cfg.d_model),
+        num_heads            = c.get("num_heads",           cfg.num_heads),
+        num_layers           = c.get("num_layers",          cfg.num_layers),
+        d_ff                 = c.get("d_ff",                cfg.d_ff),
+        dropout              = 0.0,
+        max_seq_length       = c.get("max_seq_length",      cfg.max_seq_length),
+        n_enc_features       = c.get("n_enc_features",      N_ENC),
+        n_dec_features       = c.get("n_dec_features",      N_DEC),
+        n_dec_input_features = c.get("n_dec_input_features", N_DEC_IN),
     ).to(device)
     model.load_state_dict(state)
     model.eval()
@@ -183,7 +195,7 @@ def rows_to_array(rows):
         out.append([
             r["LAT"], r["LON"], r["SOG"],
             math.sin(cog_rad), math.cos(cog_rad),
-            float(group), dt,
+            dt, float(group),   # DT at index 5, SHIP_TYPE at index 6 — matches feature_cols order
         ])
     return normalise(np.array(out, dtype=np.float32))
 
@@ -201,32 +213,30 @@ def extract_windows(track_norm):
 def predict_autoregressive(model, src_np, device):
     """Autoregressive decode for SEQ_DEC steps.
 
-    Fixes vs. the previous version
-    --------------------------------
-    1. Decoder input/output is N_DEC features (LAT, LON, SOG, COG_SIN, COG_COS).
-       SHIP_TYPE is kept in the encoder only — it cannot drift because it is
-       never in the decoder prediction.
-
-    2. Predicted COG_SIN / COG_COS are renormalised to the unit circle before
-       being fed back as the next step's decoder input.  Without this, repeated
-       floating-point accumulation drifts the heading off the unit circle.
+    Decoder input has N_DEC_IN=6 features [LAT, LON, SOG, COG_SIN, COG_COS, DT].
+    The model predicts N_DEC=5 motion features; DT is always appended from the
+    last observed inter-ping interval (src[-1, DT_IDX]) as an inference estimate.
+    COG_SIN/COG_COS are renormalised to the unit circle before feedback.
     """
-    src       = torch.from_numpy(src_np).unsqueeze(0).to(device)   # (1, SEQ_ENC, N_ENC)
-    dec_input = src[:, -1:, :N_DEC]                                  # (1, 1, N_DEC)
+    src      = torch.from_numpy(src_np).unsqueeze(0).to(device)   # (1, SEQ_ENC, N_ENC)
+    last_dt  = src[:, -1:, N_DEC:N_DEC_IN]                        # (1, 1, 1) — reuse last DT
+    dec_input = src[:, -1:, :N_DEC_IN]                             # (1, 1, N_DEC_IN)
     mu_steps, sigma_steps = [], []
 
     for _ in range(SEQ_DEC):
         mu, log_var = model(src, dec_input)
-        mu_last  = mu[:, -1:, :]                                     # (1, 1, N_DEC)
+        mu_last  = mu[:, -1:, :]                                   # (1, 1, N_DEC)
         std_last = (log_var[:, -1:, :] * 0.5).exp()
 
         # Clamp to valid normalised range then fix COG unit circle
-        next_step = mu_last.clamp(0.0, 1.0).clone()
-        sin_raw   = next_step[:, :, 3] * 2.0 - 1.0
-        cos_raw   = next_step[:, :, 4] * 2.0 - 1.0
-        mag       = (sin_raw.pow(2) + cos_raw.pow(2)).sqrt().clamp(min=1e-8)
-        next_step[:, :, 3] = (sin_raw / mag + 1.0) * 0.5
-        next_step[:, :, 4] = (cos_raw / mag + 1.0) * 0.5
+        next_motion = mu_last.clamp(0.0, 1.0).clone()
+        sin_raw     = next_motion[:, :, 3] * 2.0 - 1.0
+        cos_raw     = next_motion[:, :, 4] * 2.0 - 1.0
+        mag         = (sin_raw.pow(2) + cos_raw.pow(2)).sqrt().clamp(min=1e-8)
+        next_motion[:, :, 3] = (sin_raw / mag + 1.0) * 0.5
+        next_motion[:, :, 4] = (cos_raw / mag + 1.0) * 0.5
+
+        next_step = torch.cat([next_motion, last_dt], dim=-1)      # (1, 1, N_DEC_IN)
 
         mu_steps.append(mu_last.squeeze(0).cpu().numpy())
         sigma_steps.append(std_last.squeeze(0).cpu().numpy())

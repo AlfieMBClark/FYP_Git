@@ -3,43 +3,45 @@ train.py
 --------
 Training loop for the probabilistic Ship Trajectory Transformer.
 
-Key improvements
-----------------
+Usage
+-----
+    python train.py
+
+Requires the .bin window files produced by prepare_dataset.py.  Run that
+script once (and again whenever config.py filter/normalisation settings change)
+before calling train.py.
+
+Key design choices
+------------------
 Pure Gaussian NLL loss
-    The previous combined NLL + MSE + variance-regularisation loss had
-    conflicting gradient signals whose relative magnitudes depended on the
-    current log_var state.  Pure NLL alone is sufficient: it penalises both
-    inaccurate means (large residuals) and miscalibrated variance simultaneously.
+    Penalises both inaccurate means (large residuals) and miscalibrated
+    variance simultaneously.  No auxiliary MSE or regularisation terms.
 
 Per-feature loss weighting
     LAT and LON receive 5× the weight of SOG and COG features so the loss
-    surface aligns with geographic accuracy rather than treating all features
-    as equally important.
+    surface aligns with geographic accuracy.
 
-Scheduled sampling (earlier, higher)
-    ss_start_epoch=2, ss_max_prob=0.8 close the train/inference gap more
-    aggressively.  The decoder sees its own predictions far more often during
-    training, reducing exposure bias across 10 autoregressive steps.
+DT in decoder input
+    The encoder sees all 7 features [LAT, LON, SOG, COG_SIN, COG_COS, DT,
+    SHIP_TYPE].  The decoder receives 6 features [LAT, LON, SOG, COG_SIN,
+    COG_COS, DT] so it knows the time elapsed since the previous ping.
+    DT is always taken from ground truth (never from the model's predictions)
+    because the model predicts position/motion, not ping timing.
+    SHIP_TYPE remains encoder-only static context.
 
-Scheduled sampling COG fix
-    Predicted COG_SIN/COG_COS are renormalised to the unit circle before being
-    fed back as the next decoder input.  Without this, repeated autoregressive
-    steps drift the heading representation off the unit circle.
-
-Separate encoder/decoder feature sets
-    The encoder sees all n_enc_features (including SHIP_TYPE and DT).
-    The decoder only inputs/outputs n_dec_features dynamic features
-    (LAT, LON, SOG, COG_SIN, COG_COS).  SHIP_TYPE is static context held in
-    the encoder; DT is encoder-only temporal context.
+Scheduled sampling
+    After ss_start_epoch epochs of pure teacher forcing the decoder is
+    increasingly fed its own predictions (up to ss_max_prob), bridging the
+    train/inference gap.  DT is still ground-truth during scheduled sampling.
+    COG_SIN/COG_COS are renormalised to the unit circle before feedback to
+    prevent heading drift across autoregressive steps.
 
 ADE / FDE validation and checkpointing
     Each validation epoch computes ADE (Average Displacement Error, km/step)
     and FDE (Final Displacement Error, km) via haversine distance.  The best
-    checkpoint is saved based on ADE rather than NLL so the saved model
-    maximises the metric that matters operationally.
+    checkpoint is saved by ADE so the saved model maximises geographic accuracy.
 
-Other efficiency features (unchanged)
-    Mixed precision (AMP), gradient accumulation, OneCycleLR, torch.compile.
+Mixed precision, gradient accumulation, OneCycleLR, optional torch.compile.
 """
 
 import os
@@ -50,8 +52,9 @@ from model   import ShipTrajectoryTransformer
 from dataset import load_data
 from utils   import set_seed, haversine_tensor
 
-N_ENC = cfg.n_enc_features   # 7 — full feature set for encoder
-N_DEC = cfg.n_dec_features   # 5 — dynamic features for decoder (no SHIP_TYPE, DT)
+N_ENC    = cfg.n_enc_features        # 7 — full feature set for encoder
+N_DEC    = cfg.n_dec_features        # 5 — decoder output: LAT, LON, SOG, COG_SIN, COG_COS
+N_DEC_IN = cfg.n_dec_input_features  # 6 — decoder input: adds DT at index 5
 
 # Normalisation constants for ADE/FDE computation (LAT / LON channels)
 _LAT_LO,  _LAT_HI  = cfg.norm_bounds["LAT"]
@@ -63,24 +66,18 @@ _LON_RNG = _LON_HI - _LON_LO
 # ── Scheduled sampling ───────────────────────────────────────────────────────
 
 @torch.no_grad()
-def _build_scheduled_input(model, src, tgt_dec, teacher_prob, use_amp):
+def _build_scheduled_input(model, src, tgt_dec, tgt_dec_in, teacher_prob, use_amp):
     """Build decoder input mixing ground truth and model predictions.
 
-    src     : (B, enc_len, N_ENC)  — full encoder features
-    tgt_dec : (B, dec_len, N_DEC)  — decoder targets (dynamic features only)
+    src        : (B, enc_len, N_ENC)    — full encoder features
+    tgt_dec    : (B, dec_len, N_DEC)    — motion-only targets for GT mixing
+    tgt_dec_in : (B, dec_len, N_DEC_IN) — full decoder input including DT
 
-    teacher_prob=1.0 → pure teacher forcing.
-    teacher_prob=0.5 → ~50 % of decoder steps use the model's own prediction,
-                       bridging the train/inference gap.
-
-    Two correctness fixes applied to the predicted token before feeding back:
-      1. COG_SIN/COG_COS renormalised to the unit circle to prevent heading
-         drift across autoregressive steps.
-      2. (SHIP_TYPE is not in the decoder output — it lives in the encoder only,
-         so no drift can occur.)
+    DT (index 5 of tgt_dec_in) is always taken from ground truth — the model
+    predicts position/motion but not when the next ping will arrive.
     """
     B, T, _ = tgt_dec.shape
-    dec_input = src[:, -1:, :N_DEC]   # seed: last encoder step, dynamic features
+    dec_input = src[:, -1:, :N_DEC_IN]   # seed: last encoder step (motion + DT)
 
     _diag_printed = False
     for step in range(T - 1):
@@ -89,9 +86,15 @@ def _build_scheduled_input(model, src, tgt_dec, teacher_prob, use_amp):
         if not _diag_printed and torch.isnan(mu).any():
             print(f"  [NaN-diag] step={step} dec_input: min={dec_input.min():.4f} max={dec_input.max():.4f} has_nan={torch.isnan(dec_input).any().item()}")
             print(f"  [NaN-diag] src:       min={src.min():.4f} max={src.max():.4f} has_nan={torch.isnan(src).any().item()}")
-            print(f"  [NaN-diag] mu:        min={mu[~torch.isnan(mu)].min():.4f} max={mu[~torch.isnan(mu)].max():.4f} nan_count={torch.isnan(mu).sum().item()}")
+            _mu_valid = mu[~torch.isnan(mu)]
+            if _mu_valid.numel() > 0:
+                print(f"  [NaN-diag] mu:        min={_mu_valid.min():.4f} max={_mu_valid.max():.4f} nan_count={torch.isnan(mu).sum().item()}")
+            else:
+                print(f"  [NaN-diag] mu:        ALL NaN — nan_count={torch.isnan(mu).sum().item()} shape={list(mu.shape)}")
             _diag_printed = True
-        pred = mu[:, -1:, :].nan_to_num(nan=0.5).clamp(0.0, 1.0).clone()   # (B, 1, N_DEC)
+        # Cast to fp32: clamp(min=1e-8) is a no-op in fp16 (underflows to 0),
+        # which would make mag=0 and cause 0/0=NaN in the COG renorm below.
+        pred = mu[:, -1:, :].nan_to_num(nan=0.5).clamp(0.0, 1.0).float()   # (B, 1, N_DEC)
 
         # COG_SIN (index 3) and COG_COS (index 4) are normalised from [-1,1]
         # to [0,1].  Denormalise, project to unit circle, re-normalise so the
@@ -102,9 +105,12 @@ def _build_scheduled_input(model, src, tgt_dec, teacher_prob, use_amp):
         pred[:, :, 3] = (sin_raw / mag + 1.0) * 0.5
         pred[:, :, 4] = (cos_raw / mag + 1.0) * 0.5
 
-        gt   = tgt_dec[:, step:step + 1, :]
-        mask = (torch.rand(B, 1, 1, device=src.device) < teacher_prob).to(pred.dtype)
-        dec_input = torch.cat([dec_input, mask * gt + (1.0 - mask) * pred], dim=1)
+        gt_motion = tgt_dec[:, step:step + 1, :].float()                    # (B, 1, N_DEC)
+        gt_dt     = tgt_dec_in[:, step:step + 1, N_DEC:N_DEC_IN].float()    # (B, 1, 1) — always GT
+        mask      = (torch.rand(B, 1, 1, device=src.device) < teacher_prob).float()
+        new_motion = mask * gt_motion + (1.0 - mask) * pred                 # (B, 1, N_DEC)
+        new_token  = torch.cat([new_motion, gt_dt], dim=-1)                 # (B, 1, N_DEC_IN)
+        dec_input  = torch.cat([dec_input, new_token], dim=1)
 
     return dec_input.detach()
 
@@ -164,15 +170,16 @@ def _compute_ade_fde(mu: torch.Tensor, tgt_dec: torch.Tensor) -> tuple[float, fl
 
 def build_model() -> ShipTrajectoryTransformer:
     model = ShipTrajectoryTransformer(
-        n_features     = cfg.n_features,
-        d_model        = cfg.d_model,
-        num_heads      = cfg.num_heads,
-        num_layers     = cfg.num_layers,
-        d_ff           = cfg.d_ff,
-        max_seq_length = cfg.max_seq_length,
-        dropout        = cfg.dropout,
-        n_enc_features = cfg.n_enc_features,
-        n_dec_features = cfg.n_dec_features,
+        n_features           = cfg.n_features,
+        d_model              = cfg.d_model,
+        num_heads            = cfg.num_heads,
+        num_layers           = cfg.num_layers,
+        d_ff                 = cfg.d_ff,
+        max_seq_length       = cfg.max_seq_length,
+        dropout              = cfg.dropout,
+        n_enc_features       = cfg.n_enc_features,
+        n_dec_features       = cfg.n_dec_features,
+        n_dec_input_features = cfg.n_dec_input_features,
     ).to(cfg.device)
 
     if cfg.compile_model and hasattr(torch, "compile"):
@@ -222,20 +229,21 @@ def run_epoch(
             src = src.to(cfg.device)   # (B, enc_len, N_ENC)
             tgt = tgt.to(cfg.device)   # (B, dec_len, N_ENC)
 
-            # Decoder target: only the N_DEC dynamic features
-            tgt_dec = tgt[:, :, :N_DEC]   # (B, dec_len, N_DEC)
+            # Decoder inputs and targets
+            tgt_dec_in = tgt[:, :, :N_DEC_IN]   # (B, dec_len, N_DEC_IN) — motion + DT
 
-            if torch.isnan(tgt_dec).any():
-                nan_wins = torch.isnan(tgt_dec).any(dim=-1).any(dim=-1)
-                print(f"  [NaN-data] batch={batch_idx} epoch has {nan_wins.sum().item()} windows with NaN in tgt_dec — replacing with 0.5")
-            tgt_dec = tgt_dec.nan_to_num(0.5)
+            if torch.isnan(tgt_dec_in).any():
+                nan_wins = torch.isnan(tgt_dec_in).any(dim=-1).any(dim=-1)
+                print(f"  [NaN-data] batch={batch_idx} has {nan_wins.sum().item()} windows with NaN — replacing with 0.5")
+            tgt_dec_in = tgt_dec_in.nan_to_num(0.5)
+            tgt_dec    = tgt_dec_in[:, :, :N_DEC]   # (B, dec_len, N_DEC) — motion only, for loss
 
             # Build decoder input
             if train and teacher_prob < 1.0:
-                tgt_input = _build_scheduled_input(model, src, tgt_dec, teacher_prob, use_amp)
+                tgt_input = _build_scheduled_input(model, src, tgt_dec, tgt_dec_in, teacher_prob, use_amp)
             else:
-                last_past = src[:, -1:, :N_DEC]   # last encoder step, dynamic features
-                tgt_input = torch.cat([last_past, tgt_dec[:, :-1, :]], dim=1)
+                last_past = src[:, -1:, :N_DEC_IN]   # last encoder step, motion + DT
+                tgt_input = torch.cat([last_past, tgt_dec_in[:, :-1, :]], dim=1)
 
             # ── Forward pass ──────────────────────────────────────────────────
             with torch.autocast(device_type=cfg.device, enabled=use_amp):
@@ -357,15 +365,16 @@ def main():
                     "val_ade_km":  val_ade,
                     "val_fde_km":  val_fde,
                     "config": {
-                        "n_features":     cfg.n_features,
-                        "n_enc_features": cfg.n_enc_features,
-                        "n_dec_features": cfg.n_dec_features,
-                        "d_model":        cfg.d_model,
-                        "num_heads":      cfg.num_heads,
-                        "num_layers":     cfg.num_layers,
-                        "d_ff":           cfg.d_ff,
-                        "max_seq_length": cfg.max_seq_length,
-                        "dropout":        cfg.dropout,
+                        "n_features":          cfg.n_features,
+                        "n_enc_features":      cfg.n_enc_features,
+                        "n_dec_features":      cfg.n_dec_features,
+                        "n_dec_input_features": cfg.n_dec_input_features,
+                        "d_model":             cfg.d_model,
+                        "num_heads":           cfg.num_heads,
+                        "num_layers":          cfg.num_layers,
+                        "d_ff":                cfg.d_ff,
+                        "max_seq_length":      cfg.max_seq_length,
+                        "dropout":             cfg.dropout,
                     },
                 },
                 cfg.checkpoint_path,

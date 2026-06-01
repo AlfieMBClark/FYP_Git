@@ -5,18 +5,16 @@ One-time preprocessing step: reads the AIS SQLite database, applies all
 track-level filters, creates sliding windows, and writes three memory-mapped
 binary files (train / val / test) that train.py streams from.
 
-Run once before training:
+Run once before training (and again whenever config.py changes):
     python prepare_dataset.py
-    python prepare_dataset.py --db data/ais.db --out data/
-
-Re-run whenever you add more data to the database or change filter settings.
+    python prepare_dataset.py --db data/dma.db --out data/
 
 Pipeline
 --------
 1.  Load all distinct MMSIs and shuffle them with a fixed seed.
-2.  Split MMSIs 80 / 10 / 10 into train / val / test.
-    Splitting at MMSI level prevents the same vessel's pings appearing in
-    both train and test, which would inflate metrics through memorisation.
+2.  Split MMSIs 90 / 10 into train / val (configured by train_split / val_split).
+    Splitting at MMSI level prevents the same vessel appearing in both splits.
+    Held-out test evaluation uses WorldwideAIS via predict.py, not a DMA split.
 3.  For each split, do TWO passes through the database:
       Pass 1 — count how many windows each MMSI produces after all caps.
       Pass 2 — write those windows to a memory-mapped binary file.
@@ -204,10 +202,12 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
             continue
         if (sog_col < cfg.low_speed_threshold).mean() > cfg.low_speed_fraction:
             continue
-        # DT: seconds since previous ping; 0 for the first ping in the segment
+        # DT: seconds since previous ping; 0 for the first ping in the segment.
+        # Inserted at index 5 (before SHIP_TYPE at index 6) so that
+        # tgt[:, :, :n_dec_input_features] gives [LAT,LON,SOG,COG_SIN,COG_COS,DT].
         dt = np.zeros(len(seg), dtype=np.float32)
         dt[1:] = np.diff(ts_seg).astype(np.float32)
-        seg_with_dt = np.concatenate([seg, dt[:, np.newaxis]], axis=1)
+        seg_with_dt = np.concatenate([seg[:, :5], dt[:, np.newaxis], seg[:, 5:]], axis=1)
         normed = normalize(seg_with_dt)
         if np.isnan(normed).any():
             continue  # discard voyage segments containing NaN features
@@ -363,6 +363,80 @@ def build_anomaly_set(
     return idx
 
 
+# ── Public API (also called by Data_Processing.py) ───────────────────────────
+
+def run_prepare_phase(db_path: str, out_dir: str) -> dict:
+    """
+    Build train/val/test/anomaly window files from a SQLite AIS database.
+
+    Returns a dict with keys: n_train, n_val, n_test, n_anomaly, meta_path.
+    Called both by this script's main() and by Data_Processing.py's Phase 3
+    so that both pipelines use identical preprocessing logic.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    train_path   = str(out / "train_windows.bin")
+    val_path     = str(out / "val_windows.bin")
+    test_path    = str(out / "test_windows.bin")
+    anomaly_path = str(out / "anomaly_windows.bin")
+    meta_path    = str(out / "dataset_meta.json")
+
+    print(f"  Window   : {WINDOW_LEN} steps ({cfg.seq_len_enc} enc + {cfg.seq_len_dec} dec)")
+    print(f"  Stride   : {cfg.window_stride}")
+    print(f"  MMSI cap : {cfg.max_windows_per_mmsi} windows/vessel")
+    print(f"  Group cap: {cfg.max_windows_per_type_group:,} windows/type-group\n")
+
+    with sqlite3.connect(db_path) as conn:
+        use_flags = has_flags_column(conn)
+        flag_note = ("FLAGS=0 only" if cfg.clean_flags_only else "all FLAGS") if use_flags else "none"
+        print(f"  FLAGS column: {'present' if use_flags else 'absent'} — using {flag_note} rows\n")
+        all_mmsis = np.array([r[0] for r in conn.execute("SELECT DISTINCT MMSI FROM ais ORDER BY MMSI")])
+
+    print(f"  Total MMSIs: {len(all_mmsis):,}")
+    np.random.default_rng(seed=42).shuffle(all_mmsis)
+    n_train = int(len(all_mmsis) * cfg.train_split)
+    n_val   = int(len(all_mmsis) * cfg.val_split)
+    train_mmsis = all_mmsis[:n_train].tolist()
+    val_mmsis   = all_mmsis[n_train : n_train + n_val].tolist()
+    test_mmsis  = all_mmsis[n_train + n_val :].tolist()
+    print(f"  MMSI split — train:{len(train_mmsis):,}  val:{len(val_mmsis):,}  test:{len(test_mmsis):,}\n")
+
+    with sqlite3.connect(db_path) as conn:
+        n_train_w   = process_split(conn, train_mmsis, use_flags, train_path,   "train")
+        print()
+        n_val_w     = process_split(conn, val_mmsis,   use_flags, val_path,     "val")
+        print()
+        n_test_w    = process_split(conn, test_mmsis,  use_flags, test_path,    "test")
+        print()
+        n_anomaly_w = build_anomaly_set(conn, test_mmsis, anomaly_path) if use_flags else 0
+
+    meta = {
+        "window_len":       WINDOW_LEN,
+        "n_features":       N_FEATURES,
+        "feature_cols":     FEAT_COLS,
+        "norm_bounds":      {k: list(v) for k, v in NORM_BOUNDS.items()},
+        "seq_len_enc":      cfg.seq_len_enc,
+        "seq_len_dec":      cfg.seq_len_dec,
+        "n_train":          n_train_w,
+        "n_val":            n_val_w,
+        "n_test":           n_test_w,
+        "n_anomaly":        n_anomaly_w,
+        "ship_type_groups": {str(k): v for k, v in cfg.ship_type_groups.items()},
+        "group_names":      GROUP_NAMES,
+    }
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+    return {
+        "n_train":   n_train_w,
+        "n_val":     n_val_w,
+        "n_test":    n_test_w,
+        "n_anomaly": n_anomaly_w,
+        "meta_path": meta_path,
+    }
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -375,82 +449,18 @@ def main():
                         help="Output directory for .bin files and metadata (default: %(default)s)")
     args = parser.parse_args()
 
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-
-    train_path   = str(out / "train_windows.bin")
-    val_path     = str(out / "val_windows.bin")
-    test_path    = str(out / "test_windows.bin")
-    anomaly_path = str(out / "anomaly_windows.bin")
-    meta_path    = str(out / "dataset_meta.json")
-
     print(f"Database : {args.db}")
     print(f"Output   : {args.out}")
-    print(f"Window   : {WINDOW_LEN} steps ({cfg.seq_len_enc} enc + {cfg.seq_len_dec} dec)")
-    print(f"Stride   : {cfg.window_stride}")
-    print(f"MMSI cap : {cfg.max_windows_per_mmsi} windows/vessel")
-    print(f"Group cap: {cfg.max_windows_per_type_group:,} windows/type-group")
-    print()
 
-    with sqlite3.connect(args.db) as conn:
-        use_flags = has_flags_column(conn)
-        if use_flags:
-            flag_note = "FLAGS=0 only" if cfg.clean_flags_only else "all FLAGS"
-            print(f"FLAGS column detected — clean splits use {flag_note} rows")
-        else:
-            print("No FLAGS column — using all rows (anomaly set will be empty)")
-        print()
+    counts = run_prepare_phase(args.db, args.out)
 
-        all_mmsis = [
-            row[0] for row in conn.execute("SELECT DISTINCT MMSI FROM ais ORDER BY MMSI")
-        ]
-    print(f"Total distinct MMSIs: {len(all_mmsis):,}")
-
-    rng = np.random.default_rng(seed=42)
-    rng.shuffle(all_mmsis := np.array(all_mmsis))
-
-    n_train = int(len(all_mmsis) * cfg.train_split)
-    n_val   = int(len(all_mmsis) * cfg.val_split)
-    train_mmsis = all_mmsis[:n_train].tolist()
-    val_mmsis   = all_mmsis[n_train : n_train + n_val].tolist()
-    test_mmsis  = all_mmsis[n_train + n_val :].tolist()
-
-    print(f"MMSI split: train={len(train_mmsis):,}  val={len(val_mmsis):,}  test={len(test_mmsis):,}")
-    print()
-
-    with sqlite3.connect(args.db) as conn:
-        n_train_w   = process_split(conn, train_mmsis, use_flags, train_path,   "train")
-        print()
-        n_val_w     = process_split(conn, val_mmsis,   use_flags, val_path,     "val")
-        print()
-        n_test_w    = process_split(conn, test_mmsis,  use_flags, test_path,    "test")
-        print()
-        n_anomaly_w = build_anomaly_set(conn, test_mmsis, anomaly_path) if use_flags else 0
-
-    meta = {
-        "window_len":    WINDOW_LEN,
-        "n_features":    N_FEATURES,
-        "feature_cols":  FEAT_COLS,
-        "norm_bounds":   {k: list(v) for k, v in NORM_BOUNDS.items()},
-        "seq_len_enc":   cfg.seq_len_enc,
-        "seq_len_dec":   cfg.seq_len_dec,
-        "n_train":       n_train_w,
-        "n_val":         n_val_w,
-        "n_test":        n_test_w,
-        "n_anomaly":     n_anomaly_w,
-        "ship_type_groups": {str(k): v for k, v in cfg.ship_type_groups.items()},
-        "group_names":   GROUP_NAMES,
-    }
-    with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
-
-    print(f"\nMetadata saved to {meta_path}")
+    print(f"\nMetadata saved to {counts['meta_path']}")
     print(f"\nSummary:")
-    print(f"  train   : {n_train_w:,} windows")
-    print(f"  val     : {n_val_w:,} windows")
-    print(f"  test    : {n_test_w:,} windows")
-    print(f"  anomaly : {n_anomaly_w:,} windows  (FLAGS != 0, for eval only)")
-    print(f"  total   : {n_train_w + n_val_w + n_test_w:,} clean windows")
+    print(f"  train   : {counts['n_train']:,} windows")
+    print(f"  val     : {counts['n_val']:,} windows")
+    print(f"  test    : {counts['n_test']:,} windows")
+    print(f"  anomaly : {counts['n_anomaly']:,} windows  (FLAGS != 0, for eval only)")
+    print(f"  total   : {counts['n_train'] + counts['n_val'] + counts['n_test']:,} clean windows")
 
 
 if __name__ == "__main__":

@@ -151,23 +151,25 @@ class ShipTrajectoryTransformer(nn.Module):
 
     def __init__(
         self,
-        n_features:     int,
-        d_model:        int,
-        num_heads:      int,
-        num_layers:     int,
-        d_ff:           int,
-        max_seq_length: int,
-        dropout:        float,
-        n_enc_features: int = None,
-        n_dec_features: int = None,
+        n_features:          int,
+        d_model:             int,
+        num_heads:           int,
+        num_layers:          int,
+        d_ff:                int,
+        max_seq_length:      int,
+        dropout:             float,
+        n_enc_features:      int = None,
+        n_dec_features:      int = None,
+        n_dec_input_features: int = None,
     ):
         super().__init__()
 
-        n_enc = n_enc_features or n_features
-        n_dec = n_dec_features or n_features
+        n_enc     = n_enc_features or n_features
+        n_dec     = n_dec_features or n_features
+        n_dec_in  = n_dec_input_features or n_dec
 
         self.encoder_input_proj = nn.Linear(n_enc, d_model)
-        self.decoder_input_proj = nn.Linear(n_dec, d_model)
+        self.decoder_input_proj = nn.Linear(n_dec_in, d_model)
         self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
 
         self.encoder_layers = nn.ModuleList(
@@ -211,13 +213,13 @@ class ShipTrajectoryTransformer(nn.Module):
         -------
         mu      : (batch, tgt_len, n_dec_features)  predicted mean
         log_var : (batch, tgt_len, n_dec_features)  predicted log-variance
-                  clamped to [-8, 4] → variance in [0.0003, 54.6]
+                  clamped to [-4, 4] → variance in [0.018, 54.6]
         """
         enc_output = self._encode(src)
         dec_output = self._decode(tgt, enc_output)
 
-        mu      = self.mu_proj(dec_output)
-        log_var = self.log_var_proj(dec_output).clamp(-8.0, 4.0)
+        mu      = torch.sigmoid(self.mu_proj(dec_output))
+        log_var = self.log_var_proj(dec_output).clamp(-4.0, 4.0)
         return mu, log_var
 
     # ── Anomaly detection ─────────────────────────────────────────────────────
