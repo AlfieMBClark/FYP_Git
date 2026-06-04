@@ -5,16 +5,19 @@ End-to-end pipeline: converts raw AIS data from both sources into a single
 SQLite database, then preprocesses it into memory-mapped training windows.
 
 Usage — full pipeline (ingest both sources + build training windows):
-    python Data_Processing.py --dma "/home/tclark/alfie/DMA/downloads/2024" "/home/tclark/alfie/DMA/downloads/2025" --jsonl "/home/tclark/alfie/Worldwide AIS Network" --dma-output data/dma.db --jsonl-output data/worldwide.db --out-dir data/
+    python Data_Processing.py \
+        --dma   "C:/TriAIS/DMA/downloads/2024" \
+        --jsonl "C:/TriAIS/Worldwide AIS Network" \
+        --dma-output data/dma.db --jsonl-output data/worldwide.db --out-dir data/
 
 Usage — DMA only (no WorldwideAIS, still builds training windows):
     python Data_Processing.py \
-        --dma "/home/tclark/alfie/DMA/downloads/2024" "/home/tclark/alfie/DMA/downloads/2025" \
+        --dma "C:/TriAIS/DMA/downloads/2024" \
         --dma-output data/dma.db --out-dir data/
 
 Usage — ingestion only (skip window preparation):
     python Data_Processing.py \
-        --dma "/home/tclark/alfie/DMA/downloads/2024" \
+        --dma "C:/TriAIS/DMA/downloads/2024" \
         --dma-output data/dma.db --db-only
 
 Usage — prepare windows only (DBs already built):
@@ -145,6 +148,9 @@ def init_db(conn: sqlite3.Connection) -> None:
             COG        REAL    NOT NULL,
             SHIP_TYPE  INTEGER NOT NULL DEFAULT 0,
             FLAGS      INTEGER NOT NULL DEFAULT 0,
+            ROT        REAL    NOT NULL DEFAULT 0.0,
+            HEADING    REAL    NOT NULL DEFAULT 0.0,
+            NAV_STATUS INTEGER NOT NULL DEFAULT 0,
             UNIQUE (MMSI, TIMESTAMP)
         );
     """)
@@ -167,8 +173,9 @@ def finalise_db(conn: sqlite3.Connection) -> None:
 
 def flush_batch(conn: sqlite3.Connection, batch: list) -> None:
     conn.executemany(
-        "INSERT OR IGNORE INTO ais (MMSI,TIMESTAMP,LAT,LON,SOG,COG,SHIP_TYPE,FLAGS) "
-        "VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO ais "
+        "(MMSI,TIMESTAMP,LAT,LON,SOG,COG,SHIP_TYPE,FLAGS,ROT,HEADING,NAV_STATUS) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         batch,
     )
     conn.commit()
@@ -206,10 +213,24 @@ DMA_SHIP_TYPE_MAP = {
     "Medical": 58,   "Not party to conflict": 59,
     "Passenger": 60, "Cargo": 70,    "Tanker": 80, "Other": 90,
 }
+DMA_NAV_STATUS_MAP = {
+    "Under way using engine":     0,
+    "At anchor":                  1,
+    "Not under command":          2,
+    "Restricted manoeuvrability": 3,
+    "Constrained by her draught": 4,
+    "Moored":                     5,
+    "Aground":                    6,
+    "Engaged in fishing":         7,
+    "Under way sailing":          8,
+}
 DMA_KEEP_MOBILE                        = {"Class A", "Class B"}
 DMA_COL_TS, DMA_COL_MOB, DMA_COL_MMSI = 0, 1, 2
 DMA_COL_LAT, DMA_COL_LON               = 3, 4
+DMA_COL_NAV                            = 5
+DMA_COL_ROT                            = 6
 DMA_COL_SOG, DMA_COL_COG, DMA_COL_ST  = 7, 8, 13
+DMA_COL_HDG                            = 9
 
 
 def _parse_dma_ts(s: str):
@@ -312,6 +333,18 @@ def _dma_worker(task: tuple):
                     if ship_types and ship_type != 0 and ship_type not in ship_types:
                         skipped += 1; continue
 
+                    # ROT — blank for Class B; clamp to AIS range [-127, 127]
+                    rot_raw = _pf(row[DMA_COL_ROT]) if len(row) > DMA_COL_ROT else None
+                    rot = max(-127.0, min(127.0, rot_raw)) if rot_raw is not None else 0.0
+
+                    # Heading — 511 means "not available"; default to COG
+                    hdg_raw = _pf(row[DMA_COL_HDG]) if len(row) > DMA_COL_HDG else None
+                    heading = hdg_raw if (hdg_raw is not None and hdg_raw != 511.0 and 0.0 <= hdg_raw <= 359.0) else cog
+
+                    # Navigational status — text field mapped to int
+                    nav_str = row[DMA_COL_NAV].strip() if len(row) > DMA_COL_NAV else ""
+                    nav_status = DMA_NAV_STATUS_MAP.get(nav_str, 0)
+
                     # FLAGS always computed (updates last_pos on every ping)
                     flags = compute_flags(mmsi, lat, lon, sog, cog, uts, last_pos)
 
@@ -320,7 +353,8 @@ def _dma_worker(task: tuple):
                         skipped += 1; continue
 
                     last_ins_ts[mmsi] = uts
-                    rows.append((mmsi, ts, lat, lon, round(sog, 1), round(cog, 1), ship_type, flags))
+                    rows.append((mmsi, ts, lat, lon, round(sog, 1), round(cog, 1),
+                                 ship_type, flags, rot, round(heading, 1), nav_status))
                     inserted += 1
 
     return os.path.basename(zip_path), rows, {}, inserted, skipped
@@ -482,7 +516,8 @@ def _jsonl_worker(task: tuple):
                 continue
 
             last_ins_ts[mmsi_int] = uts
-            rows.append((mmsi_int, ts, lat, lon, round(sog, 1), round(cog, 1), 0, flags))
+            rows.append((mmsi_int, ts, lat, lon, round(sog, 1), round(cog, 1),
+                         0, flags, 0.0, round(cog, 1), 0))
             pos_added += 1
 
     return os.path.basename(gz_path), rows, static_lookup, pos_added, static_added

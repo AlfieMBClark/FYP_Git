@@ -52,9 +52,9 @@ from model   import ShipTrajectoryTransformer
 from dataset import load_data
 from utils   import set_seed, haversine_tensor
 
-N_ENC    = cfg.n_enc_features        # 7 — full feature set for encoder
-N_DEC    = cfg.n_dec_features        # 5 — decoder output: LAT, LON, SOG, COG_SIN, COG_COS
-N_DEC_IN = cfg.n_dec_input_features  # 6 — decoder input: adds DT at index 5
+N_ENC    = cfg.n_enc_features        # 14 — full feature set for encoder (adds dLAT/dLON/dCOG/ROT/HDG/NAV)
+N_DEC    = cfg.n_dec_features        # 5  — decoder output: LAT, LON, SOG, COG_SIN, COG_COS
+N_DEC_IN = cfg.n_dec_input_features  # 6  — decoder input: adds DT at index 5
 
 # Normalisation constants for ADE/FDE computation (LAT / LON channels)
 _LAT_LO,  _LAT_HI  = cfg.norm_bounds["LAT"]

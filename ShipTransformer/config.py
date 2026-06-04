@@ -62,11 +62,14 @@ class Config:
     # ── Features ──────────────────────────────────────────────────────────────
     # DT is placed before SHIP_TYPE so the decoder input slice [:N_DEC_IN]
     # naturally captures [LAT, LON, SOG, COG_SIN, COG_COS, DT] without SHIP_TYPE.
-    feature_cols         = ["LAT", "LON", "SOG", "COG_SIN", "COG_COS", "DT", "SHIP_TYPE"]
-    n_features           = 7   # total features stored per ping in .bin files
-    n_enc_features       = 7   # encoder input: full feature set
+    # dLAT, dLON, dCOG are derived delta features appended after SHIP_TYPE.
+    # They are encoder-only: the decoder input/output (indices 0-5) is unchanged.
+    feature_cols         = ["LAT", "LON", "SOG", "COG_SIN", "COG_COS", "DT", "SHIP_TYPE",
+                            "dLAT", "dLON", "dCOG", "ROT", "HDG_SIN", "HDG_COS", "NAV_STATUS"]
+    n_features           = 14  # total features stored per ping in .bin files
+    n_enc_features       = 14  # encoder input: full feature set including derived + AIS fields
     n_dec_features       = 5   # decoder output: LAT, LON, SOG, COG_SIN, COG_COS
-    n_dec_input_features = 6   # decoder input: adds DT (index 5); SHIP_TYPE stays encoder-only
+    n_dec_input_features = 6   # decoder input: adds DT (index 5); all others encoder-only
 
     # ── Normalisation (fixed physical bounds — no fitting pass needed) ─────────
     norm_bounds = {
@@ -75,8 +78,15 @@ class Config:
         "SOG":        (0.0,    30.0),
         "COG_SIN":   (-1.0,    1.0),
         "COG_COS":   (-1.0,    1.0),
-        "SHIP_TYPE":  (0.0,    7.0),
         "DT":         (0.0, 7200.0),   # seconds since previous ping; first ping = 0 (matches gap_max_seconds)
+        "SHIP_TYPE":  (0.0,    7.0),
+        "dLAT":      (-2.0,    2.0),   # degrees latitude change per ping (~30 kts × 2 h max)
+        "dLON":      (-2.0,    2.0),   # degrees longitude change per ping
+        "dCOG":    (-180.0,  180.0),   # heading change per ping (degrees, wrap-corrected)
+        "ROT":     (-127.0,  127.0),   # rate of turn °/min; 0 = no turn or Class B default
+        "HDG_SIN":   (-1.0,    1.0),   # sin(true heading); defaults to COG when unavailable
+        "HDG_COS":   (-1.0,    1.0),   # cos(true heading)
+        "NAV_STATUS": (0.0,    8.0),   # navigational status: 0=underway…8=sailing
     }
 
     # ── Loss ──────────────────────────────────────────────────────────────────
@@ -103,7 +113,7 @@ class Config:
     # ── Training ──────────────────────────────────────────────────────────────
     batch_size        = 256
     lr                = 1e-3
-    epochs            = 40
+    epochs            = 20
     num_workers       = 4
     grad_clip         = 1.0
     grad_accumulation = 4

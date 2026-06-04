@@ -6,9 +6,6 @@ Usage
 # Random vessel from the default test DB (data/worldwide.db)
 python predict.py --random
 
-#vessel from 2023.db
-python predict.py --random --count 5 --db data2/2023.db
-
 # 10 random vessels on one map
 python predict.py --random --count 10
 
@@ -32,6 +29,12 @@ from collections import Counter
 from datetime import datetime, timezone
 import numpy as np
 import torch
+
+try:
+    from global_land_mask import globe as _globe
+    _LAND_MASK_AVAILABLE = True
+except ImportError:
+    _LAND_MASK_AVAILABLE = False
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import cfg
@@ -98,6 +101,24 @@ def denormalise(arr):
 def denormalise_dec(arr):
     """Denormalise a N_DEC-feature decoder prediction from [0, 1] to physical units."""
     return np.clip(arr, 0.0, 1.0) * _DEC_RNG + _DEC_LO
+
+
+def _snap_to_water(lat: float, lon: float, max_radius_deg: float = 2.0) -> tuple[float, float]:
+    """If (lat, lon) is on land, search outward in concentric rings and return
+    the nearest water point. Falls back to the original position if none is
+    found within max_radius_deg or if global_land_mask is not installed."""
+    if not _LAND_MASK_AVAILABLE or not _globe.is_land(lat, lon):
+        return lat, lon
+    angles = np.linspace(0, 2 * math.pi, 24, endpoint=False)
+    radius = 0.1
+    while radius <= max_radius_deg:
+        for angle in angles:
+            clat = lat + radius * math.cos(angle)
+            clon = lon + radius * math.sin(angle)
+            if not _globe.is_land(clat, clon):
+                return clat, clon
+        radius += 0.1
+    return lat, lon
 
 
 def load_model(checkpoint_path, device):
@@ -183,19 +204,41 @@ def _parse_ts(ts_str) -> float:
 
 
 def rows_to_array(rows):
-    """Convert DB rows to a normalised (N, NF) array including the DT feature."""
-    group  = _dominant_group(rows)
-    out    = []
-    prev_t = None
+    """Convert DB rows to a normalised (N, NF) array including all derived features."""
+    group     = _dominant_group(rows)
+    has_extra = len(rows) > 0 and "ROT" in rows[0].keys()
+    out       = []
+    prev_t = prev_lat = prev_lon = prev_cog = None
+
     for r in rows:
-        cog_rad = math.radians(r["COG"])
-        t  = _parse_ts(r["TIMESTAMP"])
-        dt = 0.0 if prev_t is None else max(0.0, t - prev_t)
-        prev_t = t
+        lat = float(r["LAT"])
+        lon = float(r["LON"])
+        cog = float(r["COG"])
+        t   = _parse_ts(r["TIMESTAMP"])
+
+        dt   = 0.0 if prev_t   is None else max(0.0, t - prev_t)
+        dlat = 0.0 if prev_lat is None else lat - prev_lat
+        dlon = 0.0 if prev_lon is None else lon - prev_lon
+        dcog = 0.0 if prev_cog is None else ((cog - prev_cog + 180.0) % 360.0) - 180.0
+
+        prev_t = t; prev_lat = lat; prev_lon = lon; prev_cog = cog
+
+        if has_extra:
+            rot = float(r["ROT"]) if r["ROT"] is not None else 0.0
+            rot = max(-127.0, min(127.0, rot))
+            hdg = float(r["HEADING"]) if r["HEADING"] is not None else cog
+            nav = float(r["NAV_STATUS"]) if r["NAV_STATUS"] is not None else 0.0
+        else:
+            rot, hdg, nav = 0.0, cog, 0.0
+
+        cog_rad = math.radians(cog)
+        hdg_rad = math.radians(hdg)
         out.append([
-            r["LAT"], r["LON"], r["SOG"],
+            lat, lon, float(r["SOG"]),
             math.sin(cog_rad), math.cos(cog_rad),
-            dt, float(group),   # DT at index 5, SHIP_TYPE at index 6 — matches feature_cols order
+            dt, float(group),
+            dlat, dlon, dcog,
+            rot, math.sin(hdg_rad), math.cos(hdg_rad), nav,
         ])
     return normalise(np.array(out, dtype=np.float32))
 
@@ -236,9 +279,16 @@ def predict_autoregressive(model, src_np, device):
         next_motion[:, :, 3] = (sin_raw / mag + 1.0) * 0.5
         next_motion[:, :, 4] = (cos_raw / mag + 1.0) * 0.5
 
+        # Snap to nearest water point if prediction landed on land
+        lat_phys = float(next_motion[0, 0, 0]) * _DEC_RNG[0] + _DEC_LO[0]
+        lon_phys = float(next_motion[0, 0, 1]) * _DEC_RNG[1] + _DEC_LO[1]
+        lat_snapped, lon_snapped = _snap_to_water(lat_phys, lon_phys)
+        next_motion[0, 0, 0] = float((lat_snapped - _DEC_LO[0]) / _DEC_RNG[0])
+        next_motion[0, 0, 1] = float((lon_snapped - _DEC_LO[1]) / _DEC_RNG[1])
+
         next_step = torch.cat([next_motion, last_dt], dim=-1)      # (1, 1, N_DEC_IN)
 
-        mu_steps.append(mu_last.squeeze(0).cpu().numpy())
+        mu_steps.append(next_motion.squeeze(0).cpu().numpy())
         sigma_steps.append(std_last.squeeze(0).cpu().numpy())
         dec_input = torch.cat([dec_input, next_step], dim=1)
 

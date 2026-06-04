@@ -118,15 +118,13 @@ def fetch_mmsi_track(
 ) -> list[tuple]:
     """
     Return clean rows for one MMSI ordered by time.
-    Filtering to FLAGS=0 is done in SQL when use_flags is True —
-    much faster than fetching all rows and filtering in Python.
-    Each row: (TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE).
+    Each row: (TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS).
     """
     if use_flags and cfg.clean_flags_only:
-        q = ("SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE "
+        q = ("SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
              "FROM ais WHERE MMSI = ? AND FLAGS = 0 ORDER BY TIMESTAMP")
     else:
-        q = ("SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE "
+        q = ("SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
              "FROM ais WHERE MMSI = ? ORDER BY TIMESTAMP")
     return conn.execute(q, (mmsi,)).fetchall()
 
@@ -136,7 +134,7 @@ def fetch_mmsi_track_anomalous(
 ) -> list[tuple]:
     """Return only FLAGS != 0 rows for one MMSI, ordered by time."""
     return conn.execute(
-        "SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE "
+        "SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
         "FROM ais WHERE MMSI = ? AND FLAGS != 0 ORDER BY TIMESTAMP",
         (mmsi,),
     ).fetchall()
@@ -174,13 +172,23 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
             sog  = float(row[3])
             cog  = float(row[4])
             grp  = float(_itu_to_group(int(row[5])))
+            rot  = float(row[6]) if row[6] is not None else 0.0
+            rot  = max(-127.0, min(127.0, rot))
+            hdg  = float(row[7]) if row[7] is not None else cog
+            nav  = float(row[8]) if row[8] is not None else 0.0
         except (ValueError, TypeError):
             continue
         if not (_RB_LAT_MIN <= lat <= _RB_LAT_MAX and _RB_LON_MIN <= lon <= _RB_LON_MAX):
             continue
         timestamps.append(t)
         cog_rad = math.radians(cog)
-        features.append([lat, lon, sog, math.sin(cog_rad), math.cos(cog_rad), grp])
+        hdg_rad = math.radians(hdg)
+        # Indices 0-5: model features.
+        # Indices 6-8: raw lat/lon/cog kept temporarily for delta computation.
+        # Indices 9-12: ROT, HDG_SIN, HDG_COS, NAV_STATUS.
+        features.append([lat, lon, sog, math.sin(cog_rad), math.cos(cog_rad), grp,
+                         lat, lon, cog,
+                         rot, math.sin(hdg_rad), math.cos(hdg_rad), nav])
 
     if len(features) < cfg.min_voyage_points:
         return []
@@ -202,13 +210,39 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
             continue
         if (sog_col < cfg.low_speed_threshold).mean() > cfg.low_speed_fraction:
             continue
+
         # DT: seconds since previous ping; 0 for the first ping in the segment.
-        # Inserted at index 5 (before SHIP_TYPE at index 6) so that
-        # tgt[:, :, :n_dec_input_features] gives [LAT,LON,SOG,COG_SIN,COG_COS,DT].
         dt = np.zeros(len(seg), dtype=np.float32)
         dt[1:] = np.diff(ts_seg).astype(np.float32)
-        seg_with_dt = np.concatenate([seg[:, :5], dt[:, np.newaxis], seg[:, 5:]], axis=1)
-        normed = normalize(seg_with_dt)
+
+        # dLAT / dLON: position displacement in degrees per ping.
+        dlat = np.zeros(len(seg), dtype=np.float32)
+        dlon = np.zeros(len(seg), dtype=np.float32)
+        dlat[1:] = np.diff(seg[:, 6]).astype(np.float32)
+        dlon[1:] = np.diff(seg[:, 7]).astype(np.float32)
+
+        # dCOG: wrap-aware heading change in degrees per ping [-180, 180].
+        dcog = np.zeros(len(seg), dtype=np.float32)
+        raw_diff = np.diff(seg[:, 8])
+        dcog[1:] = ((raw_diff + 180.0) % 360.0 - 180.0).astype(np.float32)
+
+        # Final layout:
+        # [LAT, LON, SOG, COG_SIN, COG_COS, DT, SHIP_TYPE,
+        #  dLAT, dLON, dCOG, ROT, HDG_SIN, HDG_COS, NAV_STATUS]
+        # Decoder input/output still uses only indices 0-5 / 0-4 — unchanged.
+        seg_final = np.concatenate([
+            seg[:, :5],            # LAT, LON, SOG, COG_SIN, COG_COS  (0-4)
+            dt[:, np.newaxis],     # DT        (5)
+            seg[:, 5:6],           # SHIP_TYPE (6)
+            dlat[:, np.newaxis],   # dLAT      (7)
+            dlon[:, np.newaxis],   # dLON      (8)
+            dcog[:, np.newaxis],   # dCOG      (9)
+            seg[:, 9:10],          # ROT       (10)
+            seg[:, 10:12],         # HDG_SIN, HDG_COS (11-12)
+            seg[:, 12:13],         # NAV_STATUS (13)
+        ], axis=1)
+
+        normed = normalize(seg_final)
         if np.isnan(normed).any():
             continue  # discard voyage segments containing NaN features
         voyages.append(normed)

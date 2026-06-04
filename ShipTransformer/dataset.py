@@ -87,6 +87,10 @@ def load_data() -> tuple[DataLoader, DataLoader, DataLoader]:
 
     loaders = {}
     for split, (path, n_windows) in splits.items():
+        if n_windows == 0:
+            loaders[split] = None
+            print(f"  {split}: 0 windows (skipped)")
+            continue
         dataset = MemmapWindowDataset(path, n_windows, window_len, n_features)
         shuffle = split == "train"
         loaders[split] = DataLoader(
