@@ -72,10 +72,10 @@ class PositionWiseFeedForward(nn.Module):
         super().__init__()
         self.fc1  = nn.Linear(d_model, d_ff)
         self.fc2  = nn.Linear(d_ff, d_model)
-        self.relu = nn.ReLU()
+        self.act  = nn.GELU()
 
     def forward(self, x):
-        return self.fc2(self.relu(self.fc1(x)))
+        return self.fc2(self.act(self.fc1(x)))
 
 
 class PositionalEncoding(nn.Module):
@@ -92,6 +92,26 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x):
         return x + self.pe[:, : x.size(1)]
+
+
+class TemporalPositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, dt_feature_idx: int = 5):
+        super().__init__()
+        self.dt_idx = dt_feature_idx
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
+        )
+        self.register_buffer("div_term", div_term)
+
+    def forward(self, x: torch.Tensor, src: torch.Tensor) -> torch.Tensor:
+        dt = src[:, :, self.dt_idx]
+        cum_time = torch.cumsum(dt, dim=1) - dt[:, :1]
+        t = cum_time.unsqueeze(-1)
+
+        pe = torch.zeros_like(x)
+        pe[:, :, 0::2] = torch.sin(t * self.div_term)
+        pe[:, :, 1::2] = torch.cos(t * self.div_term[: x.size(-1) // 2])
+        return x + pe
 
 
 class EncoderLayer(nn.Module):
@@ -171,6 +191,7 @@ class ShipTrajectoryTransformer(nn.Module):
         self.encoder_input_proj = nn.Linear(n_enc, d_model)
         self.decoder_input_proj = nn.Linear(n_dec_in, d_model)
         self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
+        self.decoder_temporal_encoding = TemporalPositionalEncoding(d_model, dt_feature_idx=5)
 
         self.encoder_layers = nn.ModuleList(
             [EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)]
@@ -184,22 +205,44 @@ class ShipTrajectoryTransformer(nn.Module):
         self.mu_proj      = nn.Linear(d_model, n_dec)
         self.log_var_proj = nn.Linear(d_model, n_dec)
 
+        # Small xavier init + centred bias so initial predictions cluster near
+        # 0.5 (the middle of the normalised [0,1] target range) while keeping
+        # non-zero weights so gradient flows through mu to the decoder from
+        # epoch 1.  Zero-init blocked that path and caused a training collapse
+        # when the LR ramped up and mu_proj weight suddenly became large.
+        nn.init.xavier_uniform_(self.mu_proj.weight, gain=0.1)
+        nn.init.constant_(self.mu_proj.bias, 0.5)
+
         self.dropout = nn.Dropout(dropout)
 
     def _causal_mask(self, seq_len: int, device: torch.device) -> torch.Tensor:
         return torch.tril(torch.ones(seq_len, seq_len, device=device)).unsqueeze(0).unsqueeze(0)
 
+    @staticmethod
+    def _sanitise(x: torch.Tensor) -> torch.Tensor:
+        """Replace NaN and Inf with 0 so downstream linear layers stay finite.
+
+        The critical failure mode in fp16: an activation overflows to Inf, then
+        a linear layer with mixed-sign weights computes Inf + (−Inf) = NaN.
+        nan_to_num must handle both NaN *and* Inf — using nan=0 alone is not
+        enough because Inf passes through unchanged and causes NaN downstream.
+        """
+        return x.nan_to_num(nan=0.0, posinf=0.0, neginf=0.0)
+
     def _encode(self, src: torch.Tensor) -> torch.Tensor:
         x = self.dropout(self.positional_encoding(self.encoder_input_proj(src)))
         for layer in self.encoder_layers:
-            x = layer(x, mask=None)
+            x = self._sanitise(layer(x, mask=None))
         return x
 
     def _decode(self, tgt: torch.Tensor, enc_output: torch.Tensor) -> torch.Tensor:
         tgt_mask = self._causal_mask(tgt.size(1), tgt.device)
-        x = self.dropout(self.positional_encoding(self.decoder_input_proj(tgt)))
+        x = self.decoder_input_proj(tgt)
+        x = self.positional_encoding(x)
+        x = self.decoder_temporal_encoding(x, tgt)
+        x = self.dropout(x)
         for layer in self.decoder_layers:
-            x = layer(x, enc_output, src_mask=None, tgt_mask=tgt_mask)
+            x = self._sanitise(layer(x, enc_output, src_mask=None, tgt_mask=tgt_mask))
         return x
 
     def forward(
@@ -218,7 +261,7 @@ class ShipTrajectoryTransformer(nn.Module):
         enc_output = self._encode(src)
         dec_output = self._decode(tgt, enc_output)
 
-        mu      = torch.sigmoid(self.mu_proj(dec_output))
+        mu      = self.mu_proj(dec_output)
         log_var = self.log_var_proj(dec_output).clamp(-4.0, 4.0)
         return mu, log_var
 

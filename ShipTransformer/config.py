@@ -11,21 +11,21 @@ class Config:
     # ── Paths ──────────────────────────────────────────────────────────────────
     # Source databases — kept separate so train and test never share vessels.
     # DMA data (2 years of dense Danish/North Sea AIS) is used for training.
-    # WorldwideAIS data is used only for evaluation and prediction.
+    # A second DMA database (2023) is used only for evaluation and prediction.
     train_db_path = "data/dma.db"
-    test_db_path  = "data/worldwide.db"
+    test_db_path  = "data2/2023.db"
 
     # Pre-processed window files produced by prepare_dataset.py.
     # The .bin files are raw float32 memory-maps; shapes are in dataset_meta.json.
     train_windows   = "data/train_windows.bin"
     val_windows     = "data/val_windows.bin"
-    test_windows    = "data/test_windows.bin"
-    anomaly_windows = "data/anomaly_windows.bin"   # FLAGS != 0 rows from test MMSIs
+    test_windows    = "data2/test_windows.bin"     # WorldwideAIS 2023 — separate from DMA training data
+    anomaly_windows = "data2/anomaly_windows.bin"  # FLAGS != 0 rows from WorldwideAIS test set
     meta_path       = "data/dataset_meta.json"
 
     # ── Sequence lengths ───────────────────────────────────────────────────────
-    seq_len_enc = 60    # past pings seen by encoder (increased for better context)
-    seq_len_dec = 10    # future pings predicted by decoder
+    seq_len_enc = 90    # past pings seen by encoder
+    seq_len_dec = 10   # future pings predicted by decoder — must match dataset_meta.json
 
     # ── Train / val split (DMA DB only — test set is WorldwideAIS) ───────────
     train_split = 0.90
@@ -37,15 +37,22 @@ class Config:
     # ── Track-level filters (applied in prepare_dataset.py) ───────────────────
     gap_max_seconds     = 7_200   # 2 hours
     min_voyage_points   = 20
-    max_sog_minimum     = 1.0    # knots
+    max_sog_minimum     = 1.0    # knots — exclude near-stationary voyages from training
     low_speed_threshold = 2.0    # knots
-    low_speed_fraction  = 0.80
+    low_speed_fraction  = 0.60   # default — drop voyages where >60% of pings are below threshold
+    # Per-group overrides: ship types that legitimately operate slowly get a relaxed limit.
+    # Keys are group indices from ship_type_groups; missing groups fall back to low_speed_fraction.
+    low_speed_fraction_by_group = {
+        5: 0.90,   # Tug/Service — slow manoeuvring is normal operational behaviour
+        4: 0.80,   # Fishing — hauling, netting, slow trawling
+        6: 0.85,   # Pleasure/Sail — becalmed or motoring slowly
+    }
     clean_flags_only    = True
     window_stride       = 10
 
     # ── Stratified sampling (applied in prepare_dataset.py) ───────────────────
-    max_windows_per_mmsi       = 200
-    max_windows_per_type_group = 50_000
+    max_windows_per_mmsi       = 300
+    max_windows_per_type_group = 70_000
 
     # ── Ship-type semantic groups ─────────────────────────────────────────────
     ship_type_groups = {
@@ -93,36 +100,94 @@ class Config:
     # Per-feature weights for Gaussian NLL applied to the n_dec_features outputs
     # (order: LAT, LON, SOG, COG_SIN, COG_COS).  Higher weight on position
     # features so the loss surface aligns with geographic accuracy.
-    loss_feature_weights = [5.0, 5.0, 1.0, 1.0, 1.0]
+    loss_feature_weights = [15.0, 15.0, 1.0, 1.0, 1.0]
+
+    # Small auxiliary term that directly penalises physical position error in km.
+    # This sharpens the AR training signal without replacing the probabilistic loss.
+    aux_haversine_weight = 0.02
+
+    # Weight applied to the differentiable land-avoidance penalty during training.
+    # Set to 0.0 to disable.  Tune upward if land crossings persist after training.
+    land_penalty_weight = 0.1
 
     # ── Model architecture ────────────────────────────────────────────────────
     d_model        = 512
     num_heads      = 8
     num_layers     = 5
-    d_ff           = 1024
+    d_ff           = 2048
     dropout        = 0.1
     max_seq_length = 200
 
-    # ── Scheduled sampling ────────────────────────────────────────────────────
-    # Bridges the train/inference gap (exposure bias): after ss_start_epoch,
-    # the decoder is fed the model's own predictions instead of ground truth
-    # with linearly increasing probability, reaching ss_max_prob at the final epoch.
-    ss_start_epoch = 5    # epochs of pure teacher forcing before sampling begins
-    ss_max_prob    = 0.5  # peak probability of using model prediction as next input
+    # ── AR validation subsample (shared across phases) ────────────────────────
+    ar_val_subsample = 0.2   # fraction of val batches used for AR
 
-    # ── Training ──────────────────────────────────────────────────────────────
+    # ── Phase 1: TF convergence ────────────────────────────────────────────────
+    # Pure teacher forcing throughout — no scheduled sampling.  Optimises core
+    # predictive accuracy; checkpoint saved by TF ADE.
+    # Set skip_phase1=True to reuse an existing phase1_checkpoint_path and go
+    # straight to Phase 2.  Phase 1 is deterministic (seed=42) so the checkpoint
+    # never needs to be retrained unless hyperparameters or data change.
+    # Decoder output target: predict dLAT/dLON offsets from the previous position
+    # instead of absolute LAT/LON.  Decoder *input* stays absolute so the model
+    # retains geographic context.  At inference, positions are accumulated:
+    #   LAT_t = LAT_{t-1} + dLAT_t.
+    # dLAT/dLON bounds (-2.0, 2.0) are already in norm_bounds.
+    # REQUIRES full retrain — set skip_phase1=False when enabling this.
+    predict_deltas       = True
+    skip_phase1          = False  # seq_len_enc changed 60→90; window shape incompatible with old P1 checkpoint
+    phase1_epochs        = 60
+    phase1_lr            = 1e-3
+    phase1_lr_pct_start  = 0.15
+    phase1_ar_val_every  = 5    # AR monitoring in phase 1 (informational only)
+    phase1_ar_subsample  = 0.2
+    # After NLL plateaus, add a tiny haversine nudge to sharpen position accuracy.
+    # Set phase1_haversine_start_epoch=0 to disable.  Only active when skip_phase1=False.
+    phase1_haversine_start_epoch = 50
+    phase1_haversine_weight      = 0.005
+
+    # ── Phase 2: AR fine-tuning ────────────────────────────────────────────────
+    # Loaded from phase 1 best checkpoint.  teacher_prob anneals from
+    # phase2_teacher_start down to 0.0 over phase2_teacher_anneal_epochs, then
+    # stays at 0.0 (pure AR) for the remainder — avoids the hard TF->AR jump.
+    # CosineAnnealingLR decays from phase2_lr to 1e-6.
+    # phase2_lr was raised 10x from the original 1e-5: at 1e-5, AR ADE was
+    # flat (4.06-4.19 km, no trend) for all 40 epochs of the BestRun26 run —
+    # the optimiser was barely moving the weights.  1e-4 is still 10x below
+    # phase1_lr's peak, conservative enough to preserve phase 1 features.
+    # Note: each training batch requires 9 extra no-grad forward passes to build
+    # the AR input, so phase 2 is ~10x slower per epoch than phase 1.
+    phase2_epochs               = 60   # 3 full restart cycles of 20 epochs; cycles 4+ showed degradation
+    phase2_lr                   = 5e-5
+    phase2_teacher_start        = 1.0
+    phase2_teacher_anneal_epochs = 10   # decay to 0.0 over first 10 epochs; 80 epochs of pure AR
+    phase2_ar_val_every         = 2    # AR every 2 epochs — this is what we're optimising
+    # When teacher_prob reaches 0.0, switch from no-grad build + single forward pass
+    # to a full BPTT rollout: each of the 10 AR steps runs with gradients so the
+    # loss propagates back through the compounding error chain.
+    phase2_use_rollout          = True
+    # CosineAnnealingWarmRestarts: LR resets to phase2_lr every T0 epochs.
+    # Prevents LR from dying before BPTT has had enough cycles.
+    # T0=20 gives 3 restart cycles over 60 epochs — all in pure-AR BPTT territory.
+    phase2_warmrestart_t0       = 20
+    # Gaussian noise std injected into the lat/lon decoder input during BPTT rollout.
+    # Calibrated to the model's typical inference position error (~1.4 km at 0.001
+    # normalised units in a 16°×25° region ≈ 1.8 km).  Trains the model to remain
+    # accurate even when accumulated position errors are present — closing the
+    # training/inference distribution gap (exposure bias).  Set to 0.0 to disable.
+    phase2_position_noise_std   = 0.00
+
+    # ── Training (shared) ─────────────────────────────────────────────────────
     batch_size        = 256
-    lr                = 1e-3
-    epochs            = 20
     num_workers       = 4
     grad_clip         = 1.0
     grad_accumulation = 4
     log_every         = 1
-    use_amp           = True
-    compile_model     = False  # torch.compile requires Triton, which is Linux-only
+    use_amp           = True   # float16 AMP with GradScaler
+    compile_model     = True   # torch.compile via Triton; supported on Linux
 
     # ── Checkpointing ─────────────────────────────────────────────────────────
-    checkpoint_path = "checkpoints/best_model.pt"
+    phase1_checkpoint_path = "checkpoints/best_model_phase1.pt"
+    checkpoint_path        = "checkpoints/best_model.pt"   # phase 2 best AR ADE
 
     # ── Device ────────────────────────────────────────────────────────────────
     device = "cuda" if torch.cuda.is_available() else "cpu"

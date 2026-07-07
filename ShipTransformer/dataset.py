@@ -78,6 +78,13 @@ def load_data() -> tuple[DataLoader, DataLoader, DataLoader]:
 
     window_len = meta["window_len"]
     n_features = meta["n_features"]
+    expected_window_len = cfg.seq_len_enc + cfg.seq_len_dec
+    if window_len != expected_window_len:
+        raise ValueError(
+            f"dataset_meta.json window_len={window_len} but cfg expects "
+            f"seq_len_enc + seq_len_dec = {expected_window_len}. "
+            f"Regenerate the cached windows or restore matching config values."
+        )
 
     splits = {
         "train": (cfg.train_windows, meta["n_train"]),

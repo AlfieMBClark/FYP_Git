@@ -5,10 +5,7 @@ End-to-end pipeline: converts raw AIS data from both sources into a single
 SQLite database, then preprocesses it into memory-mapped training windows.
 
 Usage — full pipeline (ingest both sources + build training windows):
-    python Data_Processing.py \
-        --dma   "C:/TriAIS/DMA/downloads/2024" \
-        --jsonl "C:/TriAIS/Worldwide AIS Network" \
-        --dma-output data/dma.db --jsonl-output data/worldwide.db --out-dir data/
+    python Data_Processing.py --dma   "C:/TriAIS/DMA/downloads/2024" --jsonl "C:/TriAIS/Worldwide AIS Network" --dma-output data/dma.db --jsonl-output data/worldwide.db --out-dir data/
 
 Usage — DMA only (no WorldwideAIS, still builds training windows):
     python Data_Processing.py \
@@ -647,7 +644,7 @@ def main():
         parser.error("Provide --dma and/or --jsonl, or use --prepare-only.")
 
     if args.min_interval is None:
-        args.min_interval = 0 if args.sample_rate < 1.0 else 60
+        args.min_interval = 0 if args.sample_rate < 1.0 else 300
 
     dma_dirs = ", ".join(args.dma) if args.dma else "none"
     print(f"DMA sources  : {dma_dirs}")

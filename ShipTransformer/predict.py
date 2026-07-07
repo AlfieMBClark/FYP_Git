@@ -3,6 +3,8 @@ predict.py — inference and anomaly scoring against a SQLite AIS database.
 
 Usage
 -----
+python predict.py --random --count 10 --db /home/aclark/alfie/ShipTransformer/data2/2023.db
+
 # Random vessel from the default test DB (data/worldwide.db)
 python predict.py --random
 
@@ -30,21 +32,15 @@ from datetime import datetime, timezone
 import numpy as np
 import torch
 
-try:
-    from global_land_mask import globe as _globe
-    _LAND_MASK_AVAILABLE = True
-except ImportError:
-    _LAND_MASK_AVAILABLE = False
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import cfg
 from model  import ShipTrajectoryTransformer
 
-FEAT     = cfg.feature_cols          # ["LAT","LON","SOG","COG_SIN","COG_COS","DT","SHIP_TYPE"]
-NF       = cfg.n_features            # 7
-N_ENC    = cfg.n_enc_features        # 7 — encoder receives all features
-N_DEC    = cfg.n_dec_features        # 5 — decoder outputs LAT, LON, SOG, COG_SIN, COG_COS
-N_DEC_IN = cfg.n_dec_input_features  # 6 — decoder input: motion + DT (index 5)
+FEAT     = cfg.feature_cols          # 14 features: LAT,LON,SOG,COG_SIN,COG_COS,DT,SHIP_TYPE,dLAT,dLON,dCOG,ROT,HDG_SIN,HDG_COS,NAV_STATUS
+NF       = cfg.n_features            # 14
+N_ENC    = cfg.n_enc_features        # 14 — encoder receives all features
+N_DEC    = cfg.n_dec_features        # 5  — decoder outputs LAT, LON, SOG, COG_SIN, COG_COS
+N_DEC_IN = cfg.n_dec_input_features  # 6  — decoder input: motion + DT (index 5)
 SEQ_ENC  = cfg.seq_len_enc
 SEQ_DEC  = cfg.seq_len_dec
 WINDOW   = SEQ_ENC + SEQ_DEC
@@ -57,6 +53,16 @@ _RNG = _HI - _LO
 # Normalisation arrays for the 5 decoder output features (LAT…COG_COS)
 _DEC_LO  = _LO[:N_DEC]
 _DEC_RNG = _RNG[:N_DEC]
+
+# Scalar bounds for delta accumulation (used when cfg.predict_deltas=True)
+_LAT_LO,  _LAT_HI  = cfg.norm_bounds["LAT"]
+_LON_LO,  _LON_HI  = cfg.norm_bounds["LON"]
+_LAT_RNG  = _LAT_HI - _LAT_LO    # 16.0
+_LON_RNG  = _LON_HI - _LON_LO    # 25.0
+_DLAT_LO, _DLAT_HI = cfg.norm_bounds["dLAT"]
+_DLON_LO, _DLON_HI = cfg.norm_bounds["dLON"]
+_DLAT_RNG = _DLAT_HI - _DLAT_LO  # 4.0
+_DLON_RNG = _DLON_HI - _DLON_LO  # 4.0
 
 # One distinct colour per vessel slot (up to 10)
 VESSEL_COLORS = [
@@ -101,24 +107,6 @@ def denormalise(arr):
 def denormalise_dec(arr):
     """Denormalise a N_DEC-feature decoder prediction from [0, 1] to physical units."""
     return np.clip(arr, 0.0, 1.0) * _DEC_RNG + _DEC_LO
-
-
-def _snap_to_water(lat: float, lon: float, max_radius_deg: float = 2.0) -> tuple[float, float]:
-    """If (lat, lon) is on land, search outward in concentric rings and return
-    the nearest water point. Falls back to the original position if none is
-    found within max_radius_deg or if global_land_mask is not installed."""
-    if not _LAND_MASK_AVAILABLE or not _globe.is_land(lat, lon):
-        return lat, lon
-    angles = np.linspace(0, 2 * math.pi, 24, endpoint=False)
-    radius = 0.1
-    while radius <= max_radius_deg:
-        for angle in angles:
-            clat = lat + radius * math.cos(angle)
-            clon = lon + radius * math.sin(angle)
-            if not _globe.is_land(clat, clon):
-                return clat, clon
-        radius += 0.1
-    return lat, lon
 
 
 def load_model(checkpoint_path, device):
@@ -194,13 +182,31 @@ def _cog_from_sincos(sin_val, cos_val):
     return math.degrees(math.atan2(float(sin_val), float(cos_val))) % 360
 
 
+# Accepted timestamp formats (first match wins) — kept in sync with
+# ShipDashboard/sim_engine.py so both modules order rows identically.
+_TS_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S.%f",
+)
+
+
 def _parse_ts(ts_str) -> float:
-    try:
-        return datetime.strptime(str(ts_str), "%Y-%m-%dT%H:%M:%S").replace(
-            tzinfo=timezone.utc
-        ).timestamp()
-    except (ValueError, TypeError):
-        return 0.0
+    """Parse a DB timestamp to a UTC unix float. Returns NaN on failure so
+    unparseable rows are detectable instead of silently mapping to the epoch
+    (0.0), which used to corrupt DT computation and row ordering."""
+    if ts_str is None:
+        return float("nan")
+    if isinstance(ts_str, (int, float)):
+        return float(ts_str)
+    s = str(ts_str).strip()
+    for fmt in _TS_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc).timestamp()
+        except (ValueError, TypeError):
+            continue
+    return float("nan")
 
 
 def rows_to_array(rows):
@@ -216,12 +222,18 @@ def rows_to_array(rows):
         cog = float(r["COG"])
         t   = _parse_ts(r["TIMESTAMP"])
 
-        dt   = 0.0 if prev_t   is None else max(0.0, t - prev_t)
+        # Unparseable timestamps yield NaN — treat the interval as 0 and keep
+        # the previous anchor so one bad row can't poison the following DT.
+        if math.isnan(t):
+            dt = 0.0
+        else:
+            dt = 0.0 if prev_t is None else max(0.0, t - prev_t)
+            prev_t = t
         dlat = 0.0 if prev_lat is None else lat - prev_lat
         dlon = 0.0 if prev_lon is None else lon - prev_lon
         dcog = 0.0 if prev_cog is None else ((cog - prev_cog + 180.0) % 360.0) - 180.0
 
-        prev_t = t; prev_lat = lat; prev_lon = lon; prev_cog = cog
+        prev_lat = lat; prev_lon = lon; prev_cog = cog
 
         if has_extra:
             rot = float(r["ROT"]) if r["ROT"] is not None else 0.0
@@ -256,40 +268,75 @@ def extract_windows(track_norm):
 def predict_autoregressive(model, src_np, device):
     """Autoregressive decode for SEQ_DEC steps.
 
-    Decoder input has N_DEC_IN=6 features [LAT, LON, SOG, COG_SIN, COG_COS, DT].
-    The model predicts N_DEC=5 motion features; DT is always appended from the
-    last observed inter-ping interval (src[-1, DT_IDX]) as an inference estimate.
-    COG_SIN/COG_COS are renormalised to the unit circle before feedback.
+    DT handling: the last observed inter-ping interval (src[-1, DT_IDX]) is
+    reused as the DT for all predicted steps.  There is no ground-truth future
+    DT at inference, so this is the best available estimate.  For vessels with
+    consistent reporting rates (e.g. every 10s or every 5 min) the cumulative
+    time signal in the temporal PE will be accurate; for vessels with highly
+    variable intervals the later decoder steps may see a slightly wrong elapsed
+    time, but this is unavoidable without external knowledge of future gaps.
+
+    predict_deltas mode (cfg.predict_deltas=True): the model outputs dLAT/dLON
+    offsets; each step accumulates onto the previous absolute position before
+    being fed back as the next decoder input.
+
+    Always returns mu_pred (T, N_DEC) and sigma_pred (T, N_DEC) in normalised
+    [0,1] absolute-position space — callers use denormalise_dec() directly.
     """
-    src      = torch.from_numpy(src_np).unsqueeze(0).to(device)   # (1, SEQ_ENC, N_ENC)
-    last_dt  = src[:, -1:, N_DEC:N_DEC_IN]                        # (1, 1, 1) — reuse last DT
-    dec_input = src[:, -1:, :N_DEC_IN]                             # (1, 1, N_DEC_IN)
+    src         = torch.from_numpy(src_np).unsqueeze(0).to(device)  # (1, SEQ_ENC, N_ENC)
+    last_dt     = src[:, -1:, N_DEC:N_DEC_IN]                        # (1, 1, 1) — reuse last DT
+    dec_input   = src[:, -1:, :N_DEC_IN]                             # (1, 1, N_DEC_IN)
+    prev_motion = src[:, -1:, :N_DEC].float()                        # (1, 1, N_DEC) absolute
     mu_steps, sigma_steps = [], []
+    # Delta mode: the variance head is in delta-normalised units; absolute
+    # position uncertainty is the accumulated delta variance converted to
+    # absolute-normalised units. Without this, sigma (and hence z-scores)
+    # were in the wrong units — see sim_engine._batch_ar_predict.
+    var_lat_deg2 = torch.zeros((1, 1, 1), device=src.device)
+    var_lon_deg2 = torch.zeros((1, 1, 1), device=src.device)
 
     for _ in range(SEQ_DEC):
         mu, log_var = model(src, dec_input)
-        mu_last  = mu[:, -1:, :]                                   # (1, 1, N_DEC)
-        std_last = (log_var[:, -1:, :] * 0.5).exp()
+        mu_last  = mu[:, -1:, :].float()                             # (1, 1, N_DEC)
+        std_last = (log_var[:, -1:, :].float() * 0.5).exp()
 
-        # Clamp to valid normalised range then fix COG unit circle
-        next_motion = mu_last.clamp(0.0, 1.0).clone()
-        sin_raw     = next_motion[:, :, 3] * 2.0 - 1.0
-        cos_raw     = next_motion[:, :, 4] * 2.0 - 1.0
-        mag         = (sin_raw.pow(2) + cos_raw.pow(2)).sqrt().clamp(min=1e-8)
+        if cfg.predict_deltas:
+            # Accumulate dLAT/dLON onto the previous absolute position
+            prev_lat = prev_motion[:, :, 0:1] * _LAT_RNG + _LAT_LO
+            prev_lon = prev_motion[:, :, 1:2] * _LON_RNG + _LON_LO
+            dlat = mu_last[:, :, 0:1] * _DLAT_RNG + _DLAT_LO
+            dlon = mu_last[:, :, 1:2] * _DLON_RNG + _DLON_LO
+            abs_lat = ((prev_lat + dlat - _LAT_LO) / _LAT_RNG).clamp(0.0, 1.0)
+            abs_lon = ((prev_lon + dlon - _LON_LO) / _LON_RNG).clamp(0.0, 1.0)
+            sog_cog = mu_last[:, :, 2:].clamp(0.0, 1.0)
+            next_motion = torch.cat([abs_lat, abs_lon, sog_cog], dim=-1)
+        else:
+            next_motion = mu_last.clamp(0.0, 1.0)
+
+        # Renormalise COG to the unit circle
+        sin_raw = next_motion[:, :, 3] * 2.0 - 1.0
+        cos_raw = next_motion[:, :, 4] * 2.0 - 1.0
+        mag     = (sin_raw.pow(2) + cos_raw.pow(2)).sqrt().clamp(min=1e-8)
+        next_motion = next_motion.clone()
         next_motion[:, :, 3] = (sin_raw / mag + 1.0) * 0.5
         next_motion[:, :, 4] = (cos_raw / mag + 1.0) * 0.5
 
-        # Snap to nearest water point if prediction landed on land
-        lat_phys = float(next_motion[0, 0, 0]) * _DEC_RNG[0] + _DEC_LO[0]
-        lon_phys = float(next_motion[0, 0, 1]) * _DEC_RNG[1] + _DEC_LO[1]
-        lat_snapped, lon_snapped = _snap_to_water(lat_phys, lon_phys)
-        next_motion[0, 0, 0] = float((lat_snapped - _DEC_LO[0]) / _DEC_RNG[0])
-        next_motion[0, 0, 1] = float((lon_snapped - _DEC_LO[1]) / _DEC_RNG[1])
+        prev_motion = next_motion
+        next_step   = torch.cat([next_motion, last_dt], dim=-1)      # (1, 1, N_DEC_IN)
 
-        next_step = torch.cat([next_motion, last_dt], dim=-1)      # (1, 1, N_DEC_IN)
+        if cfg.predict_deltas:
+            var_lat_deg2 = var_lat_deg2 + (std_last[:, :, 0:1] * _DLAT_RNG) ** 2
+            var_lon_deg2 = var_lon_deg2 + (std_last[:, :, 1:2] * _DLON_RNG) ** 2
+            std_abs = torch.cat([
+                var_lat_deg2.sqrt() / _LAT_RNG,
+                var_lon_deg2.sqrt() / _LON_RNG,
+                std_last[:, :, 2:],
+            ], dim=-1)
+        else:
+            std_abs = std_last
 
         mu_steps.append(next_motion.squeeze(0).cpu().numpy())
-        sigma_steps.append(std_last.squeeze(0).cpu().numpy())
+        sigma_steps.append(std_abs.squeeze(0).cpu().numpy())
         dec_input = torch.cat([dec_input, next_step], dim=1)
 
     return np.concatenate(mu_steps, axis=0), np.concatenate(sigma_steps, axis=0)

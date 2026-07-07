@@ -1,6 +1,8 @@
 """
 prepare_dataset.py
 ------------------
+python3 prepare_dataset.py --db data/dma.db --test-db data2/2023.db
+
 One-time preprocessing step: reads the AIS SQLite database, applies all
 track-level filters, creates sliding windows, and writes three memory-mapped
 binary files (train / val / test) that train.py streams from.
@@ -15,10 +17,12 @@ Pipeline
 2.  Split MMSIs 90 / 10 into train / val (configured by train_split / val_split).
     Splitting at MMSI level prevents the same vessel appearing in both splits.
     Held-out test evaluation uses WorldwideAIS via predict.py, not a DMA split.
-3.  For each split, do TWO passes through the database:
-      Pass 1 — count how many windows each MMSI produces after all caps.
-      Pass 2 — write those windows to a memory-mapped binary file.
-    Two passes mean we know the exact file size before allocating the memmap.
+3.  For each split, MMSIs are processed in parallel (multiprocessing.Pool):
+      Each worker fetches a batch of MMSIs in a single SQL query, runs
+      split_and_filter, and returns (voyages, dominant_group) per MMSI.
+    Cap accounting (per-MMSI and per-type-group limits) is applied serially
+    in the original MMSI order so output is deterministic.
+    Voyages are cached in memory, so no second DB pass is needed.
 4.  Build an anomaly evaluation set from FLAGS != 0 rows in the test MMSIs.
 5.  Save a metadata JSON with shapes used by dataset.py.
 
@@ -52,9 +56,9 @@ meaningful categorical signal instead of near-arbitrary integers.
 import argparse
 import json
 import math
+import multiprocessing
 import sqlite3
 from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -79,6 +83,14 @@ GROUP_NAMES = [
 ]
 N_GROUPS = len(GROUP_NAMES)
 
+# SQLite expression that converts a text TIMESTAMP column to a unix integer
+# directly in the DB engine — avoids Python datetime.strptime per ping.
+_TS_EXPR = "CAST(strftime('%s', TIMESTAMP) AS INTEGER)"
+
+# Parallelism: one SQLite connection per worker, one batch query per call.
+_N_WORKERS  = min(multiprocessing.cpu_count(), 8)
+_BATCH_SIZE = 64   # MMSIs per worker call
+
 
 # ── Ship-type helpers ──────────────────────────────────────────────────────────
 
@@ -96,12 +108,6 @@ def _dominant_group(rows) -> int:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def ts_to_unix(ts_str: str) -> float:
-    return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S").replace(
-        tzinfo=timezone.utc
-    ).timestamp()
-
-
 def normalize(arr: np.ndarray) -> np.ndarray:
     return np.clip((arr - _NORM_LO) / _NORM_RNG, 0.0, 1.0)
 
@@ -118,13 +124,14 @@ def fetch_mmsi_track(
 ) -> list[tuple]:
     """
     Return clean rows for one MMSI ordered by time.
-    Each row: (TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS).
+    Each row: (unix_ts, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS).
+    Timestamp is returned as a unix integer via SQLite strftime.
     """
     if use_flags and cfg.clean_flags_only:
-        q = ("SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
+        q = (f"SELECT {_TS_EXPR}, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
              "FROM ais WHERE MMSI = ? AND FLAGS = 0 ORDER BY TIMESTAMP")
     else:
-        q = ("SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
+        q = (f"SELECT {_TS_EXPR}, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
              "FROM ais WHERE MMSI = ? ORDER BY TIMESTAMP")
     return conn.execute(q, (mmsi,)).fetchall()
 
@@ -134,7 +141,7 @@ def fetch_mmsi_track_anomalous(
 ) -> list[tuple]:
     """Return only FLAGS != 0 rows for one MMSI, ordered by time."""
     return conn.execute(
-        "SELECT TIMESTAMP, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
+        f"SELECT {_TS_EXPR}, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
         "FROM ais WHERE MMSI = ? AND FLAGS != 0 ORDER BY TIMESTAMP",
         (mmsi,),
     ).fetchall()
@@ -157,16 +164,26 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
 
     DT (7th feature) is the time in seconds since the previous ping within the
     same gap-free segment.  The first ping of each segment gets DT = 0.
+
+    row[0] must be a unix timestamp (integer or float) as returned by the
+    _TS_EXPR SQL expression.
     """
     if not rows:
         return []
+
+    # Determine the vessel's dominant ship-type group so we can apply the
+    # appropriate low_speed_fraction limit.  Tugs, fishing, and leisure vessels
+    # legitimately spend most of their time below the speed threshold, so they
+    # get a relaxed limit from low_speed_fraction_by_group.
+    dom_group = _dominant_group(rows)
+    low_speed_limit = cfg.low_speed_fraction_by_group.get(dom_group, cfg.low_speed_fraction)
 
     timestamps: list[float] = []
     features:   list[list]  = []
 
     for row in rows:
         try:
-            t    = ts_to_unix(row[0])
+            t    = float(row[0])   # unix timestamp from SQLite strftime
             lat  = float(row[1])
             lon  = float(row[2])
             sog  = float(row[3])
@@ -208,7 +225,7 @@ def split_and_filter(rows: list[tuple]) -> list[np.ndarray]:
         sog_col = seg[:, 2]
         if sog_col.max() < cfg.max_sog_minimum:
             continue
-        if (sog_col < cfg.low_speed_threshold).mean() > cfg.low_speed_fraction:
+        if (sog_col < cfg.low_speed_threshold).mean() > low_speed_limit:
             continue
 
         # DT: seconds since previous ping; 0 for the first ping in the segment.
@@ -272,43 +289,116 @@ def _write_mmsi_windows(
     return written
 
 
-# ── Two-pass stratified writer ─────────────────────────────────────────────────
+# ── Parallel worker functions (module-level so they are picklable) ─────────────
+
+def _worker_process_mmsis(args: tuple) -> list[tuple]:
+    """
+    Fetch and process a batch of MMSIs with a single SQL query.
+
+    Opens its own SQLite connection (required — connections are not picklable).
+    Returns a list of (voyages, dominant_group) tuples in the same order as
+    the input mmsis list, so cap accounting in the caller stays deterministic.
+    """
+    db_path, mmsis, use_flags = args
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA cache_size=-32000")   # 32 MB read cache per worker
+    conn.execute("PRAGMA mmap_size=4294967296")  # memory-mapped I/O up to 4 GB
+
+    placeholders = ','.join('?' * len(mmsis))
+    if use_flags and cfg.clean_flags_only:
+        q = (f"SELECT MMSI, {_TS_EXPR}, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
+             f"FROM ais WHERE MMSI IN ({placeholders}) AND FLAGS = 0 ORDER BY MMSI, TIMESTAMP")
+    else:
+        q = (f"SELECT MMSI, {_TS_EXPR}, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
+             f"FROM ais WHERE MMSI IN ({placeholders}) ORDER BY MMSI, TIMESTAMP")
+
+    all_rows = conn.execute(q, mmsis).fetchall()
+    conn.close()
+
+    # Group rows by MMSI (already ordered by MMSI, TIMESTAMP from SQL).
+    mmsi_rows: dict[int, list] = {m: [] for m in mmsis}
+    for row in all_rows:
+        mmsi_rows[row[0]].append(row[1:])  # strip MMSI prefix; row[1] is now unix ts
+
+    return [
+        (split_and_filter(mmsi_rows.get(m, [])), _dominant_group(mmsi_rows.get(m, [])))
+        for m in mmsis  # preserve submission order
+    ]
+
+
+def _worker_anomaly_mmsis(args: tuple) -> list[list]:
+    """
+    Fetch and process anomalous (FLAGS != 0) pings for a batch of MMSIs.
+
+    Returns a list of voyage-lists (one per MMSI) in submission order.
+    """
+    db_path, mmsis = args
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA cache_size=-32000")
+    conn.execute("PRAGMA mmap_size=4294967296")
+
+    placeholders = ','.join('?' * len(mmsis))
+    q = (f"SELECT MMSI, {_TS_EXPR}, LAT, LON, SOG, COG, SHIP_TYPE, ROT, HEADING, NAV_STATUS "
+         f"FROM ais WHERE MMSI IN ({placeholders}) AND FLAGS != 0 ORDER BY MMSI, TIMESTAMP")
+
+    all_rows = conn.execute(q, mmsis).fetchall()
+    conn.close()
+
+    mmsi_rows: dict[int, list] = {m: [] for m in mmsis}
+    for row in all_rows:
+        mmsi_rows[row[0]].append(row[1:])
+
+    return [split_and_filter(mmsi_rows.get(m, [])) for m in mmsis]
+
+
+# ── Stratified writer ──────────────────────────────────────────────────────────
 
 def process_split(
-    conn:      sqlite3.Connection,
+    db_path:   str,
     mmsis:     list[int],
     use_flags: bool,
     bin_path:  str,
     label:     str,
 ) -> int:
     """
-    Two-pass write with per-MMSI and per-type-group window caps.
+    Parallel MMSI processing with stratified window caps.
 
-    Pass 1 — simulate the cap logic to get an exact total window count.
-    Allocate memmap.
-    Pass 2 — replay the same cap logic and write windows.
+    MMSIs are processed in parallel batches (_BATCH_SIZE each, _N_WORKERS
+    processes).  pool.imap returns results in submission order, so cap
+    accounting proceeds in the original MMSI order — output is identical to
+    the original serial implementation.
 
-    Both passes process MMSIs in the same order with the same deterministic
-    SQL queries, so the cap consumption is identical and pass counts match.
+    Processed voyages are cached in memory after the parallel step, so no
+    second database pass is needed.
     """
-    # ── Pass 1: count ─────────────────────────────────────────────────────
-    print(f"  [{label}] Pass 1: counting windows across {len(mmsis):,} ships ...")
+    print(f"  [{label}] Processing {len(mmsis):,} ships "
+          f"({_N_WORKERS} workers, batch {_BATCH_SIZE}) ...")
+
+    batches     = [mmsis[i : i + _BATCH_SIZE] for i in range(0, len(mmsis), _BATCH_SIZE)]
+    worker_args = [(db_path, batch, use_flags) for batch in batches]
+
+    with multiprocessing.Pool(processes=_N_WORKERS) as pool:
+        batch_results = list(pool.imap(_worker_process_mmsis, worker_args))
+
+    # Flatten in MMSI submission order.
+    all_results = [item for batch in batch_results for item in batch]
+
+    # Apply per-MMSI and per-type-group caps serially (must be in MMSI order).
     group_remaining = {g: cfg.max_windows_per_type_group for g in range(N_GROUPS)}
     group_counts    = {g: 0 for g in range(N_GROUPS)}
+    cached: list[tuple] = []   # (voyages, max_windows_to_write)
     total = 0
 
-    for mmsi in mmsis:
-        rows    = fetch_mmsi_track(conn, mmsi, use_flags)
-        voyages = split_and_filter(rows)
-        tg      = _dominant_group(rows)
-        n       = min(
+    for voyages, tg in all_results:
+        n = min(
             count_windows_for_voyages(voyages),
             cfg.max_windows_per_mmsi,
             group_remaining[tg],
         )
         group_remaining[tg] -= n
         group_counts[tg]    += n
-        total               += n
+        cached.append((voyages, n))
+        total += n
 
     gb = total * WINDOW_LEN * N_FEATURES * 4 / 1e9
     print(f"  [{label}] {total:,} windows ({gb:.2f} GB)")
@@ -321,23 +411,15 @@ def process_split(
         print(f"  [{label}] WARNING: no windows produced — check filters.")
         return 0
 
-    # ── Allocate memmap ───────────────────────────────────────────────────
+    # ── Write ─────────────────────────────────────────────────────────────────
     Path(bin_path).parent.mkdir(parents=True, exist_ok=True)
     fp = np.memmap(bin_path, dtype="float32", mode="w+",
                    shape=(total, WINDOW_LEN, N_FEATURES))
 
-    # ── Pass 2: write ─────────────────────────────────────────────────────
-    print(f"  [{label}] Pass 2: writing windows ...")
-    group_remaining = {g: cfg.max_windows_per_type_group for g in range(N_GROUPS)}
+    print(f"  [{label}] Writing windows ...")
     idx = 0
-
-    for mmsi in mmsis:
-        rows    = fetch_mmsi_track(conn, mmsi, use_flags)
-        voyages = split_and_filter(rows)
-        tg      = _dominant_group(rows)
-        max_w   = min(cfg.max_windows_per_mmsi, group_remaining[tg])
+    for voyages, max_w in cached:
         written = _write_mmsi_windows(fp, idx, voyages, max_w)
-        group_remaining[tg] -= written
         idx += written
 
     del fp
@@ -348,7 +430,7 @@ def process_split(
 # ── Anomaly evaluation set ────────────────────────────────────────────────────
 
 def build_anomaly_set(
-    conn:     sqlite3.Connection,
+    db_path:  str,
     mmsis:    list[int],
     bin_path: str,
 ) -> int:
@@ -364,12 +446,17 @@ def build_anomaly_set(
     so windows have consistent length and structure, but only anomalous rows
     are used as input.
     """
-    print("  [anomaly] Pass 1: counting anomalous windows ...")
-    total = 0
-    for mmsi in mmsis:
-        rows    = fetch_mmsi_track_anomalous(conn, mmsi)
-        voyages = split_and_filter(rows)
-        total  += count_windows_for_voyages(voyages)
+    print("  [anomaly] Processing anomalous windows ...")
+
+    batches     = [mmsis[i : i + _BATCH_SIZE] for i in range(0, len(mmsis), _BATCH_SIZE)]
+    worker_args = [(db_path, batch) for batch in batches]
+
+    with multiprocessing.Pool(processes=_N_WORKERS) as pool:
+        batch_results = list(pool.imap(_worker_anomaly_mmsis, worker_args))
+
+    all_voyages = [vs for batch in batch_results for vs in batch]
+
+    total = sum(count_windows_for_voyages(vs) for vs in all_voyages)
 
     if total == 0:
         print("  [anomaly] No anomalous windows found "
@@ -381,11 +468,9 @@ def build_anomaly_set(
     fp = np.memmap(bin_path, dtype="float32", mode="w+",
                    shape=(total, WINDOW_LEN, N_FEATURES))
 
-    print("  [anomaly] Pass 2: writing anomalous windows ...")
+    print("  [anomaly] Writing anomalous windows ...")
     idx = 0
-    for mmsi in mmsis:
-        rows    = fetch_mmsi_track_anomalous(conn, mmsi)
-        voyages = split_and_filter(rows)
+    for voyages in all_voyages:
         for v in voyages:
             n = len(v)
             for start in range(0, n - WINDOW_LEN + 1, cfg.window_stride):
@@ -395,6 +480,67 @@ def build_anomaly_set(
     del fp
     print(f"  [anomaly] Done — {idx:,} windows written to {bin_path}")
     return idx
+
+
+# ── Test-only DB processing ───────────────────────────────────────────────────
+
+def build_test_from_db(db_path: str, out_dir: str, meta_path: str) -> dict:
+    """
+    Process a separate database as pure test data — all MMSIs go into the
+    test set with no train/val split.
+
+    Writes test_windows.bin and (if FLAGS present) anomaly_windows.bin to
+    out_dir, then updates the counts in an existing meta_path JSON.
+
+    Called when --test-db is supplied to main(), or directly when a second
+    DMA source should be held out for evaluation only.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    test_path    = str(out / "test_windows.bin")
+    anomaly_path = str(out / "anomaly_windows.bin")
+
+    print(f"\n[test-db] {db_path}")
+    with sqlite3.connect(db_path) as conn:
+        use_flags  = has_flags_column(conn)
+        flag_note  = ("FLAGS=0 only" if cfg.clean_flags_only else "all FLAGS") if use_flags else "none"
+        print(f"  FLAGS column: {'present' if use_flags else 'absent'} — using {flag_note} rows\n")
+        all_mmsis = [r[0] for r in conn.execute("SELECT DISTINCT MMSI FROM ais ORDER BY MMSI")]
+
+    print(f"  Total MMSIs (all → test): {len(all_mmsis):,}")
+
+    n_test_w    = process_split(db_path, all_mmsis, use_flags, test_path, "test")
+    print()
+    n_anomaly_w = build_anomaly_set(db_path, all_mmsis, anomaly_path) if use_flags else 0
+
+    # Merge counts into the existing meta JSON (created by run_prepare_phase).
+    if Path(meta_path).exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+    else:
+        meta = {
+            "window_len":       WINDOW_LEN,
+            "n_features":       N_FEATURES,
+            "feature_cols":     FEAT_COLS,
+            "norm_bounds":      {k: list(v) for k, v in NORM_BOUNDS.items()},
+            "seq_len_enc":      cfg.seq_len_enc,
+            "seq_len_dec":      cfg.seq_len_dec,
+            "n_train":          0,
+            "n_val":            0,
+            "ship_type_groups": {str(k): v for k, v in cfg.ship_type_groups.items()},
+            "group_names":      GROUP_NAMES,
+        }
+
+    meta["n_test"]    = n_test_w
+    meta["n_anomaly"] = n_anomaly_w
+    meta["test_db"]   = db_path
+
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+    print(f"\n[test-db] meta updated at {meta_path}")
+    return {"n_test": n_test_w, "n_anomaly": n_anomaly_w, "meta_path": meta_path}
 
 
 # ── Public API (also called by Data_Processing.py) ───────────────────────────
@@ -436,14 +582,13 @@ def run_prepare_phase(db_path: str, out_dir: str) -> dict:
     test_mmsis  = all_mmsis[n_train + n_val :].tolist()
     print(f"  MMSI split — train:{len(train_mmsis):,}  val:{len(val_mmsis):,}  test:{len(test_mmsis):,}\n")
 
-    with sqlite3.connect(db_path) as conn:
-        n_train_w   = process_split(conn, train_mmsis, use_flags, train_path,   "train")
-        print()
-        n_val_w     = process_split(conn, val_mmsis,   use_flags, val_path,     "val")
-        print()
-        n_test_w    = process_split(conn, test_mmsis,  use_flags, test_path,    "test")
-        print()
-        n_anomaly_w = build_anomaly_set(conn, test_mmsis, anomaly_path) if use_flags else 0
+    n_train_w   = process_split(db_path, train_mmsis, use_flags, train_path,   "train")
+    print()
+    n_val_w     = process_split(db_path, val_mmsis,   use_flags, val_path,     "val")
+    print()
+    n_test_w    = process_split(db_path, test_mmsis,  use_flags, test_path,    "test")
+    print()
+    n_anomaly_w = build_anomaly_set(db_path, test_mmsis, anomaly_path) if use_flags else 0
 
     meta = {
         "window_len":       WINDOW_LEN,
@@ -481,12 +626,30 @@ def main():
                         help="Path to the training SQLite database (default: %(default)s)")
     parser.add_argument("--out", default="data/",
                         help="Output directory for .bin files and metadata (default: %(default)s)")
+    parser.add_argument("--test-db", default=None,
+                        help="Path to a separate database whose MMSIs are all used as test data "
+                             "(default: %(default)s — uses holdout MMSIs from --db instead). "
+                             f"Config default: {cfg.test_db_path}")
+    parser.add_argument("--test-out", default=None,
+                        help="Output directory for test-DB windows (default: same as --out). "
+                             "Pass a separate path (e.g. data2/) to keep WorldwideAIS windows "
+                             "isolated from the DMA training data.")
     args = parser.parse_args()
 
     print(f"Database : {args.db}")
     print(f"Output   : {args.out}")
+    if args.test_db:
+        test_out = args.test_out or args.out
+        print(f"Test DB  : {args.test_db}")
+        print(f"Test out : {test_out}")
 
     counts = run_prepare_phase(args.db, args.out)
+
+    if args.test_db:
+        meta_path   = str(Path(args.out) / "dataset_meta.json")
+        test_counts = build_test_from_db(args.test_db, test_out, meta_path)
+        counts["n_test"]    = test_counts["n_test"]
+        counts["n_anomaly"] = test_counts["n_anomaly"]
 
     print(f"\nMetadata saved to {counts['meta_path']}")
     print(f"\nSummary:")
