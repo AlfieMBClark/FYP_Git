@@ -1,0 +1,13 @@
+# Optional geospatial dependencies.
+#
+# Only needed to (re)generate the coastline / land-polygon assets used by the
+# on-land detector — i.e. running ShipTransformer/utils.py. Normal training,
+# evaluation, and the dashboard do NOT need these (the prebuilt land mask and
+# the lightweight `global-land-mask` package cover runtime).
+#
+# These pull in heavy native libraries (GEOS/GDAL/PROJ); install only if you
+# intend to rebuild the land assets.
+geopandas>=1.0
+osmnx>=2.0
+pyproj>=3.6
+shapely>=2.0

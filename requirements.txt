@@ -1,0 +1,17 @@
+# Core dependencies — training, evaluation, inference, and the dashboard.
+# Versions are lower bounds matching a known-good environment (Python 3.12).
+#
+# PyTorch: the pinned build in the dev environment is a CUDA 12.4 wheel
+# (torch==2.6.0+cu124). Do NOT pin the +cuXXX suffix here — install the build
+# that matches your machine:
+#   CPU-only : pip install torch>=2.2
+#   CUDA     : follow https://pytorch.org/get-started/locally/ for your CUDA version
+torch>=2.2
+
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8
+folium>=0.15          # interactive HTML maps written by predict.py
+flask>=3.0            # ShipDashboard/server.py
+requests>=2.31        # DataHandling/DataCollection/collect.py (AIS download)
+global-land-mask>=1.0 # on-land anomaly rule (precompute.py, sim_engine.py)

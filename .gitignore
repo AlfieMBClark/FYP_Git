@@ -1,0 +1,19 @@
+# Python bytecode / caches (auto-generated on import)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Large AIS databases — supplied locally, never committed (see README "Data")
+*.db
+*.db-journal
+
+# Local editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp
