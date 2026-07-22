@@ -26,9 +26,11 @@ _HERE        = os.path.dirname(os.path.abspath(__file__))
 _TRANSFORMER = os.path.abspath(os.path.join(_HERE, "..", "ShipTransformer"))
 _DEFAULT_MAP_OUT     = os.path.join(_HERE, "prediction.html")
 _DEFAULT_COMPARE_OUT = os.path.join(_HERE, "comparison.html")
+_DATAHANDLING = os.path.abspath(os.path.join(_HERE, "..", "DataHandling"))
 sys.path.insert(0, _HERE)
 sys.path.insert(0, _TRANSFORMER)
-os.chdir(_TRANSFORMER)  # config.py / dataset.py use relative paths rooted here
+sys.path.insert(0, _DATAHANDLING)  # dataset.py lives here
+os.chdir(_TRANSFORMER)  # config.py checkpoint/log paths are relative to here
 from config    import cfg
 from tcn_model import ShipTCNModel
 
@@ -36,9 +38,9 @@ FEAT     = cfg.feature_cols
 NF       = cfg.n_features            # 14
 N_DEC    = cfg.n_dec_features        # 5
 N_DEC_IN = cfg.n_dec_input_features  # 6
-SEQ_ENC  = cfg.seq_len_enc           # 60
+SEQ_ENC  = cfg.seq_len_enc           # 90
 SEQ_DEC  = cfg.seq_len_dec           # 10
-WINDOW   = SEQ_ENC + SEQ_DEC         # 70
+WINDOW   = SEQ_ENC + SEQ_DEC         # 100
 
 _LO  = np.array([cfg.norm_bounds[f][0] for f in FEAT], dtype=np.float32)
 _HI  = np.array([cfg.norm_bounds[f][1] for f in FEAT], dtype=np.float32)
@@ -46,6 +48,19 @@ _RNG = _HI - _LO
 
 _DEC_LO  = _LO[:N_DEC]
 _DEC_RNG = _RNG[:N_DEC]
+
+# Scalar bounds for delta accumulation.  The Transformer is trained with
+# cfg.predict_deltas=True, so in --compare mode it outputs dLAT/dLON offsets that
+# must be accumulated onto the previous absolute position — exactly as
+# ShipTransformer/predict.py does.
+_LAT_LO,  _LAT_HI  = cfg.norm_bounds["LAT"]
+_LON_LO,  _LON_HI  = cfg.norm_bounds["LON"]
+_LAT_RNG  = _LAT_HI - _LAT_LO
+_LON_RNG  = _LON_HI - _LON_LO
+_DLAT_LO, _DLAT_HI = cfg.norm_bounds["dLAT"]
+_DLON_LO, _DLON_HI = cfg.norm_bounds["dLON"]
+_DLAT_RNG = _DLAT_HI - _DLAT_LO
+_DLON_RNG = _DLON_HI - _DLON_LO
 
 VESSEL_COLORS = [
     "#1f77b4", "#d62728", "#9467bd", "#ff7f0e",
@@ -255,27 +270,64 @@ def predict_tcn(model: ShipTCNModel, src_np: np.ndarray, device) -> tuple[np.nda
 
 @torch.no_grad()
 def predict_transformer(model, src_np: np.ndarray, device) -> tuple[np.ndarray, np.ndarray]:
-    """Autoregressive Transformer inference (mirrors predict.py behaviour)."""
-    src       = torch.from_numpy(src_np).unsqueeze(0).to(device)
-    last_dt   = src[:, -1:, N_DEC:N_DEC_IN]
-    dec_input = src[:, -1:, :N_DEC_IN]
+    """Autoregressive Transformer inference — matches ShipTransformer/predict.py.
+
+    The Transformer is trained with cfg.predict_deltas=True, so each step outputs
+    a dLAT/dLON offset that is accumulated onto the previous absolute position
+    before being fed back in.  The returned sigma is the accumulated positional
+    uncertainty converted to absolute-normalised units.
+    """
+    src         = torch.from_numpy(src_np).unsqueeze(0).to(device)
+    last_dt     = src[:, -1:, N_DEC:N_DEC_IN]
+    dec_input   = src[:, -1:, :N_DEC_IN]
+    prev_motion = src[:, -1:, :N_DEC].float()
     mu_steps, sigma_steps = [], []
+    var_lat_deg2 = torch.zeros((1, 1, 1), device=src.device)
+    var_lon_deg2 = torch.zeros((1, 1, 1), device=src.device)
 
     for _ in range(SEQ_DEC):
         mu, log_var = model(src, dec_input)
-        mu_last  = mu[:, -1:, :]
-        std_last = (log_var[:, -1:, :] * 0.5).exp()
+        mu_last  = mu[:, -1:, :].float()
+        std_last = (log_var[:, -1:, :].float() * 0.5).exp()
 
-        next_motion = mu_last.clamp(0.0, 1.0).clone()
+        if cfg.predict_deltas:
+            # Accumulate the predicted dLAT/dLON onto the previous absolute position.
+            prev_lat = prev_motion[:, :, 0:1] * _LAT_RNG + _LAT_LO
+            prev_lon = prev_motion[:, :, 1:2] * _LON_RNG + _LON_LO
+            dlat     = mu_last[:, :, 0:1] * _DLAT_RNG + _DLAT_LO
+            dlon     = mu_last[:, :, 1:2] * _DLON_RNG + _DLON_LO
+            abs_lat  = ((prev_lat + dlat - _LAT_LO) / _LAT_RNG).clamp(0.0, 1.0)
+            abs_lon  = ((prev_lon + dlon - _LON_LO) / _LON_RNG).clamp(0.0, 1.0)
+            sog_cog  = mu_last[:, :, 2:].clamp(0.0, 1.0)
+            next_motion = torch.cat([abs_lat, abs_lon, sog_cog], dim=-1)
+        else:
+            next_motion = mu_last.clamp(0.0, 1.0)
+
+        # Renormalise COG back onto the unit circle.
+        next_motion = next_motion.clone()
         sin_raw = next_motion[:, :, 3] * 2.0 - 1.0
         cos_raw = next_motion[:, :, 4] * 2.0 - 1.0
         mag     = (sin_raw.pow(2) + cos_raw.pow(2)).sqrt().clamp(min=1e-8)
         next_motion[:, :, 3] = (sin_raw / mag + 1.0) * 0.5
         next_motion[:, :, 4] = (cos_raw / mag + 1.0) * 0.5
 
-        next_step = torch.cat([next_motion, last_dt], dim=-1)
+        prev_motion = next_motion
+        next_step   = torch.cat([next_motion, last_dt], dim=-1)
+
+        if cfg.predict_deltas:
+            # Positional variance accumulates step to step; convert to absolute units.
+            var_lat_deg2 = var_lat_deg2 + (std_last[:, :, 0:1] * _DLAT_RNG) ** 2
+            var_lon_deg2 = var_lon_deg2 + (std_last[:, :, 1:2] * _DLON_RNG) ** 2
+            std_abs = torch.cat([
+                var_lat_deg2.sqrt() / _LAT_RNG,
+                var_lon_deg2.sqrt() / _LON_RNG,
+                std_last[:, :, 2:],
+            ], dim=-1)
+        else:
+            std_abs = std_last
+
         mu_steps.append(next_motion.squeeze(0).cpu().numpy())
-        sigma_steps.append(std_last.squeeze(0).cpu().numpy())
+        sigma_steps.append(std_abs.squeeze(0).cpu().numpy())
         dec_input = torch.cat([dec_input, next_step], dim=1)
 
     return np.concatenate(mu_steps, axis=0), np.concatenate(sigma_steps, axis=0)

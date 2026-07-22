@@ -1,0 +1,1382 @@
+Logging to logs/train_20260717_020812.log
+
+  train: 792,557 windows
+  val: 307,312 windows
+  test: 387,525 windows
+  torch.compile: enabled
+  [water mask] Loaded 3200×5000 raster from data/water_mask.npz
+  [land mask] Raster ready (3200×5000 cells, 0.005° res, OSM-aware, eroded 2 cell)
+Model: 2,318,346 trainable parameters
+Device: cuda  AMP: enabled
+Effective batch size: 1024
+Encoder features: 14  Decoder features: 5
+
+
+============================================================
+PHASE 1 — Teacher-Forced Convergence
+  epochs=60  lr=0.001  teacher=1.00 (fixed)
+============================================================
+
+  batch 309/3096  loss=-10.627354
+  batch 618/3096  loss=-11.506503
+  batch 927/3096  loss=-11.844626
+  batch 1236/3096  loss=-12.052288
+  batch 1545/3096  loss=-12.198569
+  batch 1854/3096  loss=-12.303365
+  batch 2163/3096  loss=-12.382814
+  batch 2472/3096  loss=-12.445565
+  batch 2781/3096  loss=-12.497971
+  batch 3090/3096  loss=-12.541619
+[P1] Epoch   1/60  train=-12.542413  val=-13.014561  tf_ade=0.593 km  -.--- km(AR)  lr=6.90e-05
+  ✓ [P1] saved best (tf_ade=0.593 km)
+  batch 309/3096  loss=-12.942390
+  batch 618/3096  loss=-12.945004
+  batch 927/3096  loss=-12.947442
+  batch 1236/3096  loss=-12.950204
+  batch 1545/3096  loss=-12.951754
+  batch 1854/3096  loss=-12.953921
+  batch 2163/3096  loss=-12.955956
+  batch 2472/3096  loss=-12.957919
+  batch 2781/3096  loss=-12.959245
+  batch 3090/3096  loss=-12.960654
+[P1] Epoch   2/60  train=-12.960693  val=-13.045054  tf_ade=0.639 km  -.--- km(AR)  lr=1.52e-04
+  batch 309/3096  loss=-12.972274
+  batch 618/3096  loss=-12.973715
+  batch 927/3096  loss=-12.974130
+  batch 1236/3096  loss=-12.975475
+  batch 1545/3096  loss=-12.976692
+  batch 1854/3096  loss=-12.977063
+  batch 2163/3096  loss=-12.977807
+  batch 2472/3096  loss=-12.977990
+  batch 2781/3096  loss=-12.978433
+  batch 3090/3096  loss=-12.978998
+[P1] Epoch   3/60  train=-12.979007  val=-13.048332  tf_ade=0.891 km  -.--- km(AR)  lr=2.80e-04
+  batch 309/3096  loss=-12.983053
+  batch 618/3096  loss=-12.983472
+  batch 927/3096  loss=-12.984544
+  batch 1236/3096  loss=-12.984892
+  batch 1545/3096  loss=-12.985682
+  batch 1854/3096  loss=-12.986008
+  batch 2163/3096  loss=-12.986378
+  batch 2472/3096  loss=-12.986874
+  batch 2781/3096  loss=-12.987159
+  batch 3090/3096  loss=-12.987472
+[P1] Epoch   4/60  train=-12.987481  val=-13.048001  tf_ade=1.303 km  -.--- km(AR)  lr=4.37e-04
+  batch 309/3096  loss=-12.989421
+  batch 618/3096  loss=-12.990155
+  batch 927/3096  loss=-12.991019
+  batch 1236/3096  loss=-12.990802
+  batch 1545/3096  loss=-12.991873
+  batch 1854/3096  loss=-12.991965
+  batch 2163/3096  loss=-12.992360
+  batch 2472/3096  loss=-12.992730
+  batch 2781/3096  loss=-12.992931
+  batch 3090/3096  loss=-12.993142
+[P1] Epoch   5/60  train=-12.993134  val=-13.052305  tf_ade=1.708 km  9.463 km(AR)  lr=6.03e-04
+  batch 309/3096  loss=-12.996891
+  batch 618/3096  loss=-12.995636
+  batch 927/3096  loss=-12.995733
+  batch 1236/3096  loss=-12.995962
+  batch 1545/3096  loss=-12.996347
+  batch 1854/3096  loss=-12.996744
+  batch 2163/3096  loss=-12.996903
+  batch 2472/3096  loss=-12.996963
+  batch 2781/3096  loss=-12.996996
+  batch 3090/3096  loss=-12.997204
+[P1] Epoch   6/60  train=-12.997197  val=-13.054306  tf_ade=1.057 km  -.--- km(AR)  lr=7.60e-04
+  batch 309/3096  loss=-13.000338
+  batch 618/3096  loss=-12.998268
+  batch 927/3096  loss=-12.998111
+  batch 1236/3096  loss=-12.998770
+  batch 1545/3096  loss=-12.998653
+  batch 1854/3096  loss=-12.999094
+  batch 2163/3096  loss=-12.999471
+  batch 2472/3096  loss=-12.999189
+  batch 2781/3096  loss=-12.999465
+  batch 3090/3096  loss=-12.999485
+[P1] Epoch   7/60  train=-12.999499  val=-13.056784  tf_ade=1.368 km  -.--- km(AR)  lr=8.88e-04
+  batch 309/3096  loss=-13.002226
+  batch 618/3096  loss=-13.001151
+  batch 927/3096  loss=-13.001622
+  batch 1236/3096  loss=-13.001487
+  batch 1545/3096  loss=-13.001415
+  batch 1854/3096  loss=-13.001471
+  batch 2163/3096  loss=-13.001465
+  batch 2472/3096  loss=-13.001971
+  batch 2781/3096  loss=-13.001813
+  batch 3090/3096  loss=-13.001610
+[P1] Epoch   8/60  train=-13.001623  val=-13.059756  tf_ade=1.446 km  -.--- km(AR)  lr=9.71e-04
+  batch 309/3096  loss=-13.000653
+  batch 618/3096  loss=-13.002992
+  batch 927/3096  loss=-13.003140
+  batch 1236/3096  loss=-13.003811
+  batch 1545/3096  loss=-13.004176
+  batch 1854/3096  loss=-13.004242
+  batch 2163/3096  loss=-13.004169
+  batch 2472/3096  loss=-13.004143
+  batch 2781/3096  loss=-13.003632
+  batch 3090/3096  loss=-13.003828
+[P1] Epoch   9/60  train=-13.003845  val=-13.060160  tf_ade=1.122 km  -.--- km(AR)  lr=1.00e-03
+  batch 309/3096  loss=-13.008744
+  batch 618/3096  loss=-13.007111
+  batch 927/3096  loss=-13.006631
+  batch 1236/3096  loss=-13.005466
+  batch 1545/3096  loss=-13.005635
+  batch 1854/3096  loss=-13.005544
+  batch 2163/3096  loss=-13.005823
+  batch 2472/3096  loss=-13.005816
+  batch 2781/3096  loss=-13.006277
+  batch 3090/3096  loss=-13.006529
+[P1] Epoch  10/60  train=-13.006513  val=-13.062206  tf_ade=0.932 km  5.377 km(AR)  lr=9.99e-04
+  batch 309/3096  loss=-13.006396
+  batch 618/3096  loss=-13.007344
+  batch 927/3096  loss=-13.008126
+  batch 1236/3096  loss=-13.008038
+  batch 1545/3096  loss=-13.008232
+  batch 1854/3096  loss=-13.008106
+  batch 2163/3096  loss=-13.008158
+  batch 2472/3096  loss=-13.008228
+  batch 2781/3096  loss=-13.008439
+  batch 3090/3096  loss=-13.008487
+[P1] Epoch  11/60  train=-13.008482  val=-13.062810  tf_ade=0.892 km  -.--- km(AR)  lr=9.96e-04
+  batch 309/3096  loss=-13.009567
+  batch 618/3096  loss=-13.010044
+  batch 927/3096  loss=-13.009419
+  batch 1236/3096  loss=-13.009399
+  batch 1545/3096  loss=-13.009868
+  batch 1854/3096  loss=-13.009938
+  batch 2163/3096  loss=-13.010304
+  batch 2472/3096  loss=-13.010253
+  batch 2781/3096  loss=-13.010327
+  batch 3090/3096  loss=-13.010425
+[P1] Epoch  12/60  train=-13.010433  val=-13.062061  tf_ade=0.522 km  -.--- km(AR)  lr=9.91e-04
+  ✓ [P1] saved best (tf_ade=0.522 km)
+  batch 309/3096  loss=-13.009309
+  batch 618/3096  loss=-13.011984
+  batch 927/3096  loss=-13.012019
+  batch 1236/3096  loss=-13.011629
+  batch 1545/3096  loss=-13.011958
+  batch 1854/3096  loss=-13.011787
+  batch 2163/3096  loss=-13.011921
+  batch 2472/3096  loss=-13.011942
+  batch 2781/3096  loss=-13.012184
+  batch 3090/3096  loss=-13.011781
+[P1] Epoch  13/60  train=-13.011793  val=-13.061002  tf_ade=0.880 km  -.--- km(AR)  lr=9.85e-04
+  batch 309/3096  loss=-13.015998
+  batch 618/3096  loss=-13.012875
+  batch 927/3096  loss=-13.012654
+  batch 1236/3096  loss=-13.012739
+  batch 1545/3096  loss=-13.012671
+  batch 1854/3096  loss=-13.012914
+  batch 2163/3096  loss=-13.012822
+  batch 2472/3096  loss=-13.012868
+  batch 2781/3096  loss=-13.013160
+  batch 3090/3096  loss=-13.013090
+[P1] Epoch  14/60  train=-13.013067  val=-13.064906  tf_ade=0.673 km  -.--- km(AR)  lr=9.76e-04
+  batch 309/3096  loss=-13.013001
+  batch 618/3096  loss=-13.013222
+  batch 927/3096  loss=-13.013288
+  batch 1236/3096  loss=-13.013741
+  batch 1545/3096  loss=-13.013958
+  batch 1854/3096  loss=-13.013710
+  batch 2163/3096  loss=-13.013588
+  batch 2472/3096  loss=-13.013601
+  batch 2781/3096  loss=-13.013704
+  batch 3090/3096  loss=-13.013795
+[P1] Epoch  15/60  train=-13.013830  val=-13.064859  tf_ade=0.714 km  4.046 km(AR)  lr=9.66e-04
+  batch 309/3096  loss=-13.015757
+  batch 618/3096  loss=-13.016131
+  batch 927/3096  loss=-13.015451
+  batch 1236/3096  loss=-13.015480
+  batch 1545/3096  loss=-13.015286
+  batch 1854/3096  loss=-13.015412
+  batch 2163/3096  loss=-13.015663
+  batch 2472/3096  loss=-13.014908
+  batch 2781/3096  loss=-13.014921
+  batch 3090/3096  loss=-13.014930
+[P1] Epoch  16/60  train=-13.014937  val=-13.065430  tf_ade=0.442 km  -.--- km(AR)  lr=9.54e-04
+  ✓ [P1] saved best (tf_ade=0.442 km)
+  batch 309/3096  loss=-13.015038
+  batch 618/3096  loss=-13.014968
+  batch 927/3096  loss=-13.015802
+  batch 1236/3096  loss=-13.015718
+  batch 1545/3096  loss=-13.016205
+  batch 1854/3096  loss=-13.016169
+  batch 2163/3096  loss=-13.016370
+  batch 2472/3096  loss=-13.016405
+  batch 2781/3096  loss=-13.016254
+  batch 3090/3096  loss=-13.015955
+[P1] Epoch  17/60  train=-13.015964  val=-13.065570  tf_ade=0.429 km  -.--- km(AR)  lr=9.40e-04
+  ✓ [P1] saved best (tf_ade=0.429 km)
+  batch 309/3096  loss=-13.017935
+  batch 618/3096  loss=-13.017333
+  batch 927/3096  loss=-13.017667
+  batch 1236/3096  loss=-13.017353
+  batch 1545/3096  loss=-13.017136
+  batch 1854/3096  loss=-13.017023
+  batch 2163/3096  loss=-13.016905
+  batch 2472/3096  loss=-13.016801
+  batch 2781/3096  loss=-13.016613
+  batch 3090/3096  loss=-13.016689
+[P1] Epoch  18/60  train=-13.016682  val=-13.066279  tf_ade=0.385 km  -.--- km(AR)  lr=9.25e-04
+  ✓ [P1] saved best (tf_ade=0.385 km)
+  batch 309/3096  loss=-13.019024
+  batch 618/3096  loss=-13.018823
+  batch 927/3096  loss=-13.018995
+  batch 1236/3096  loss=-13.018622
+  batch 1545/3096  loss=-13.018581
+  batch 1854/3096  loss=-13.018068
+  batch 2163/3096  loss=-13.017936
+  batch 2472/3096  loss=-13.018180
+  batch 2781/3096  loss=-13.017987
+  batch 3090/3096  loss=-13.017574
+[P1] Epoch  19/60  train=-13.017583  val=-13.064308  tf_ade=0.675 km  -.--- km(AR)  lr=9.08e-04
+  batch 309/3096  loss=-13.018964
+  batch 618/3096  loss=-13.018359
+  batch 927/3096  loss=-13.018664
+  batch 1236/3096  loss=-13.018489
+  batch 1545/3096  loss=-13.018739
+  batch 1854/3096  loss=-13.018796
+  batch 2163/3096  loss=-13.018638
+  batch 2472/3096  loss=-13.018503
+  batch 2781/3096  loss=-13.018429
+  batch 3090/3096  loss=-13.018326
+[P1] Epoch  20/60  train=-13.018315  val=-13.066085  tf_ade=0.652 km  3.584 km(AR)  lr=8.90e-04
+  batch 309/3096  loss=-13.018091
+  batch 618/3096  loss=-13.018755
+  batch 927/3096  loss=-13.018518
+  batch 1236/3096  loss=-13.018895
+  batch 1545/3096  loss=-13.019123
+  batch 1854/3096  loss=-13.018908
+  batch 2163/3096  loss=-13.018978
+  batch 2472/3096  loss=-13.019010
+  batch 2781/3096  loss=-13.018833
+  batch 3090/3096  loss=-13.018914
+[P1] Epoch  21/60  train=-13.018883  val=-13.066552  tf_ade=0.376 km  -.--- km(AR)  lr=8.69e-04
+  ✓ [P1] saved best (tf_ade=0.376 km)
+  batch 309/3096  loss=-13.018199
+  batch 618/3096  loss=-13.019536
+  batch 927/3096  loss=-13.019966
+  batch 1236/3096  loss=-13.019624
+  batch 1545/3096  loss=-13.019440
+  batch 1854/3096  loss=-13.019362
+  batch 2163/3096  loss=-13.019413
+  batch 2472/3096  loss=-13.019381
+  batch 2781/3096  loss=-13.019503
+  batch 3090/3096  loss=-13.019495
+[P1] Epoch  22/60  train=-13.019501  val=-13.066678  tf_ade=0.428 km  -.--- km(AR)  lr=8.48e-04
+  batch 309/3096  loss=-13.019919
+  batch 618/3096  loss=-13.019043
+  batch 927/3096  loss=-13.018454
+  batch 1236/3096  loss=-13.019215
+  batch 1545/3096  loss=-13.019537
+  batch 1854/3096  loss=-13.019711
+  batch 2163/3096  loss=-13.019932
+  batch 2472/3096  loss=-13.020008
+  batch 2781/3096  loss=-13.020138
+  batch 3090/3096  loss=-13.020176
+[P1] Epoch  23/60  train=-13.020180  val=-13.066374  tf_ade=0.571 km  -.--- km(AR)  lr=8.25e-04
+  batch 309/3096  loss=-13.020329
+  batch 618/3096  loss=-13.020849
+  batch 927/3096  loss=-13.021165
+  batch 1236/3096  loss=-13.020940
+  batch 1545/3096  loss=-13.021277
+  batch 1854/3096  loss=-13.021443
+  batch 2163/3096  loss=-13.021427
+  batch 2472/3096  loss=-13.021026
+  batch 2781/3096  loss=-13.021195
+  batch 3090/3096  loss=-13.020932
+[P1] Epoch  24/60  train=-13.020940  val=-13.067012  tf_ade=0.571 km  -.--- km(AR)  lr=8.01e-04
+  batch 309/3096  loss=-13.023462
+  batch 618/3096  loss=-13.023040
+  batch 927/3096  loss=-13.021989
+  batch 1236/3096  loss=-13.021844
+  batch 1545/3096  loss=-13.021989
+  batch 1854/3096  loss=-13.022270
+  batch 2163/3096  loss=-13.022221
+  batch 2472/3096  loss=-13.022005
+  batch 2781/3096  loss=-13.021731
+  batch 3090/3096  loss=-13.021600
+[P1] Epoch  25/60  train=-13.021607  val=-13.067304  tf_ade=0.436 km  2.491 km(AR)  lr=7.76e-04
+  batch 309/3096  loss=-13.023529
+  batch 618/3096  loss=-13.022107
+  batch 927/3096  loss=-13.021422
+  batch 1236/3096  loss=-13.021549
+  batch 1545/3096  loss=-13.021780
+  batch 1854/3096  loss=-13.021793
+  batch 2163/3096  loss=-13.021881
+  batch 2472/3096  loss=-13.022123
+  batch 2781/3096  loss=-13.022298
+  batch 3090/3096  loss=-13.022290
+[P1] Epoch  26/60  train=-13.022295  val=-13.067351  tf_ade=0.318 km  -.--- km(AR)  lr=7.50e-04
+  ✓ [P1] saved best (tf_ade=0.318 km)
+  batch 309/3096  loss=-13.020951
+  batch 618/3096  loss=-13.021945
+  batch 927/3096  loss=-13.022590
+  batch 1236/3096  loss=-13.022501
+  batch 1545/3096  loss=-13.022795
+  batch 1854/3096  loss=-13.022848
+  batch 2163/3096  loss=-13.022963
+  batch 2472/3096  loss=-13.022931
+  batch 2781/3096  loss=-13.023064
+  batch 3090/3096  loss=-13.023112
+[P1] Epoch  27/60  train=-13.023125  val=-13.066038  tf_ade=0.820 km  -.--- km(AR)  lr=7.23e-04
+  batch 309/3096  loss=-13.021939
+  batch 618/3096  loss=-13.023835
+  batch 927/3096  loss=-13.023411
+  batch 1236/3096  loss=-13.023324
+  batch 1545/3096  loss=-13.023838
+  batch 1854/3096  loss=-13.023804
+  batch 2163/3096  loss=-13.023712
+  batch 2472/3096  loss=-13.023851
+  batch 2781/3096  loss=-13.023839
+  batch 3090/3096  loss=-13.023678
+[P1] Epoch  28/60  train=-13.023692  val=-13.067760  tf_ade=0.352 km  -.--- km(AR)  lr=6.95e-04
+  batch 309/3096  loss=-13.027153
+  batch 618/3096  loss=-13.026194
+  batch 927/3096  loss=-13.025236
+  batch 1236/3096  loss=-13.024729
+  batch 1545/3096  loss=-13.024803
+  batch 1854/3096  loss=-13.024611
+  batch 2163/3096  loss=-13.024846
+  batch 2472/3096  loss=-13.024832
+  batch 2781/3096  loss=-13.024520
+  batch 3090/3096  loss=-13.024415
+[P1] Epoch  29/60  train=-13.024443  val=-13.067613  tf_ade=0.317 km  -.--- km(AR)  lr=6.66e-04
+  ✓ [P1] saved best (tf_ade=0.317 km)
+  batch 309/3096  loss=-13.025687
+  batch 618/3096  loss=-13.026505
+  batch 927/3096  loss=-13.027048
+  batch 1236/3096  loss=-13.026383
+  batch 1545/3096  loss=-13.025871
+  batch 1854/3096  loss=-13.025422
+  batch 2163/3096  loss=-13.025206
+  batch 2472/3096  loss=-13.024948
+  batch 2781/3096  loss=-13.024993
+  batch 3090/3096  loss=-13.025168
+[P1] Epoch  30/60  train=-13.025172  val=-13.067833  tf_ade=0.238 km  1.388 km(AR)  lr=6.37e-04
+  ✓ [P1] saved best (tf_ade=0.238 km)
+  batch 309/3096  loss=-13.025028
+  batch 618/3096  loss=-13.026077
+  batch 927/3096  loss=-13.026794
+  batch 1236/3096  loss=-13.026505
+  batch 1545/3096  loss=-13.026505
+  batch 1854/3096  loss=-13.026531
+  batch 2163/3096  loss=-13.026401
+  batch 2472/3096  loss=-13.026280
+  batch 2781/3096  loss=-13.025967
+  batch 3090/3096  loss=-13.025878
+[P1] Epoch  31/60  train=-13.025872  val=-13.067624  tf_ade=0.266 km  -.--- km(AR)  lr=6.07e-04
+  batch 309/3096  loss=-13.026877
+  batch 618/3096  loss=-13.026529
+  batch 927/3096  loss=-13.027284
+  batch 1236/3096  loss=-13.027211
+  batch 1545/3096  loss=-13.027246
+  batch 1854/3096  loss=-13.027263
+  batch 2163/3096  loss=-13.027100
+  batch 2472/3096  loss=-13.026713
+  batch 2781/3096  loss=-13.026571
+  batch 3090/3096  loss=-13.026608
+[P1] Epoch  32/60  train=-13.026607  val=-13.067056  tf_ade=0.304 km  -.--- km(AR)  lr=5.77e-04
+  batch 309/3096  loss=-13.028269
+  batch 618/3096  loss=-13.028937
+  batch 927/3096  loss=-13.028324
+  batch 1236/3096  loss=-13.028052
+  batch 1545/3096  loss=-13.027916
+  batch 1854/3096  loss=-13.027924
+  batch 2163/3096  loss=-13.027536
+  batch 2472/3096  loss=-13.027227
+  batch 2781/3096  loss=-13.027074
+  batch 3090/3096  loss=-13.027335
+[P1] Epoch  33/60  train=-13.027354  val=-13.067470  tf_ade=0.411 km  -.--- km(AR)  lr=5.46e-04
+  batch 309/3096  loss=-13.029319
+  batch 618/3096  loss=-13.029191
+  batch 927/3096  loss=-13.029102
+  batch 1236/3096  loss=-13.028813
+  batch 1545/3096  loss=-13.028665
+  batch 1854/3096  loss=-13.028773
+  batch 2163/3096  loss=-13.028596
+  batch 2472/3096  loss=-13.028532
+  batch 2781/3096  loss=-13.028161
+  batch 3090/3096  loss=-13.028033
+[P1] Epoch  34/60  train=-13.028042  val=-13.067302  tf_ade=0.318 km  -.--- km(AR)  lr=5.15e-04
+  batch 309/3096  loss=-13.030514
+  batch 618/3096  loss=-13.029890
+  batch 927/3096  loss=-13.028822
+  batch 1236/3096  loss=-13.029266
+  batch 1545/3096  loss=-13.029327
+  batch 1854/3096  loss=-13.029261
+  batch 2163/3096  loss=-13.029109
+  batch 2472/3096  loss=-13.028791
+  batch 2781/3096  loss=-13.028722
+  batch 3090/3096  loss=-13.028817
+[P1] Epoch  35/60  train=-13.028827  val=-13.067399  tf_ade=0.291 km  1.667 km(AR)  lr=4.85e-04
+  batch 309/3096  loss=-13.030785
+  batch 618/3096  loss=-13.031219
+  batch 927/3096  loss=-13.030818
+  batch 1236/3096  loss=-13.030366
+  batch 1545/3096  loss=-13.029791
+  batch 1854/3096  loss=-13.029664
+  batch 2163/3096  loss=-13.029350
+  batch 2472/3096  loss=-13.029115
+  batch 2781/3096  loss=-13.029370
+  batch 3090/3096  loss=-13.029615
+[P1] Epoch  36/60  train=-13.029624  val=-13.067412  tf_ade=0.261 km  -.--- km(AR)  lr=4.54e-04
+  batch 309/3096  loss=-13.030258
+  batch 618/3096  loss=-13.031079
+  batch 927/3096  loss=-13.030607
+  batch 1236/3096  loss=-13.030199
+  batch 1545/3096  loss=-13.030367
+  batch 1854/3096  loss=-13.030461
+  batch 2163/3096  loss=-13.030569
+  batch 2472/3096  loss=-13.030534
+  batch 2781/3096  loss=-13.030220
+  batch 3090/3096  loss=-13.030400
+[P1] Epoch  37/60  train=-13.030417  val=-13.066980  tf_ade=0.208 km  -.--- km(AR)  lr=4.23e-04
+  ✓ [P1] saved best (tf_ade=0.208 km)
+  batch 309/3096  loss=-13.032669
+  batch 618/3096  loss=-13.031720
+  batch 927/3096  loss=-13.031238
+  batch 1236/3096  loss=-13.031407
+  batch 1545/3096  loss=-13.031343
+  batch 1854/3096  loss=-13.031234
+  batch 2163/3096  loss=-13.031439
+  batch 2472/3096  loss=-13.031339
+  batch 2781/3096  loss=-13.031152
+  batch 3090/3096  loss=-13.031245
+[P1] Epoch  38/60  train=-13.031240  val=-13.067148  tf_ade=0.338 km  -.--- km(AR)  lr=3.93e-04
+  batch 309/3096  loss=-13.032075
+  batch 618/3096  loss=-13.031436
+  batch 927/3096  loss=-13.032001
+  batch 1236/3096  loss=-13.032145
+  batch 1545/3096  loss=-13.032131
+  batch 1854/3096  loss=-13.031945
+  batch 2163/3096  loss=-13.031995
+  batch 2472/3096  loss=-13.032013
+  batch 2781/3096  loss=-13.032107
+  batch 3090/3096  loss=-13.032074
+[P1] Epoch  39/60  train=-13.032080  val=-13.066975  tf_ade=0.216 km  -.--- km(AR)  lr=3.63e-04
+  batch 309/3096  loss=-13.033015
+  batch 618/3096  loss=-13.033583
+  batch 927/3096  loss=-13.033613
+  batch 1236/3096  loss=-13.033252
+  batch 1545/3096  loss=-13.033335
+  batch 1854/3096  loss=-13.033399
+  batch 2163/3096  loss=-13.033479
+  batch 2472/3096  loss=-13.033214
+  batch 2781/3096  loss=-13.032911
+  batch 3090/3096  loss=-13.032869
+[P1] Epoch  40/60  train=-13.032863  val=-13.066876  tf_ade=0.346 km  1.914 km(AR)  lr=3.34e-04
+  batch 309/3096  loss=-13.033987
+  batch 618/3096  loss=-13.034227
+  batch 927/3096  loss=-13.034350
+  batch 1236/3096  loss=-13.034104
+  batch 1545/3096  loss=-13.033643
+  batch 1854/3096  loss=-13.033609
+  batch 2163/3096  loss=-13.033783
+  batch 2472/3096  loss=-13.033854
+  batch 2781/3096  loss=-13.033771
+  batch 3090/3096  loss=-13.033578
+[P1] Epoch  41/60  train=-13.033590  val=-13.066865  tf_ade=0.230 km  -.--- km(AR)  lr=3.05e-04
+  batch 309/3096  loss=-13.034702
+  batch 618/3096  loss=-13.035013
+  batch 927/3096  loss=-13.034896
+  batch 1236/3096  loss=-13.035210
+  batch 1545/3096  loss=-13.034854
+  batch 1854/3096  loss=-13.034888
+  batch 2163/3096  loss=-13.034486
+  batch 2472/3096  loss=-13.034232
+  batch 2781/3096  loss=-13.034271
+  batch 3090/3096  loss=-13.034367
+[P1] Epoch  42/60  train=-13.034371  val=-13.066699  tf_ade=0.226 km  -.--- km(AR)  lr=2.77e-04
+  batch 309/3096  loss=-13.037264
+  batch 618/3096  loss=-13.037048
+  batch 927/3096  loss=-13.036205
+  batch 1236/3096  loss=-13.035563
+  batch 1545/3096  loss=-13.035467
+  batch 1854/3096  loss=-13.035320
+  batch 2163/3096  loss=-13.035259
+  batch 2472/3096  loss=-13.035077
+  batch 2781/3096  loss=-13.035058
+  batch 3090/3096  loss=-13.035130
+[P1] Epoch  43/60  train=-13.035124  val=-13.066193  tf_ade=0.296 km  -.--- km(AR)  lr=2.50e-04
+  batch 309/3096  loss=-13.036989
+  batch 618/3096  loss=-13.035451
+  batch 927/3096  loss=-13.035196
+  batch 1236/3096  loss=-13.035591
+  batch 1545/3096  loss=-13.035551
+  batch 1854/3096  loss=-13.035545
+  batch 2163/3096  loss=-13.035746
+  batch 2472/3096  loss=-13.035785
+  batch 2781/3096  loss=-13.035690
+  batch 3090/3096  loss=-13.035773
+[P1] Epoch  44/60  train=-13.035781  val=-13.066308  tf_ade=0.212 km  -.--- km(AR)  lr=2.24e-04
+  batch 309/3096  loss=-13.036336
+  batch 618/3096  loss=-13.036836
+  batch 927/3096  loss=-13.037235
+  batch 1236/3096  loss=-13.037175
+  batch 1545/3096  loss=-13.037053
+  batch 1854/3096  loss=-13.036888
+  batch 2163/3096  loss=-13.036844
+  batch 2472/3096  loss=-13.036720
+  batch 2781/3096  loss=-13.036508
+  batch 3090/3096  loss=-13.036522
+[P1] Epoch  45/60  train=-13.036523  val=-13.066197  tf_ade=0.204 km  1.224 km(AR)  lr=1.99e-04
+  ✓ [P1] saved best (tf_ade=0.204 km)
+  batch 309/3096  loss=-13.037511
+  batch 618/3096  loss=-13.038176
+  batch 927/3096  loss=-13.037886
+  batch 1236/3096  loss=-13.037616
+  batch 1545/3096  loss=-13.037707
+  batch 1854/3096  loss=-13.037553
+  batch 2163/3096  loss=-13.037393
+  batch 2472/3096  loss=-13.037125
+  batch 2781/3096  loss=-13.037227
+  batch 3090/3096  loss=-13.037164
+[P1] Epoch  46/60  train=-13.037166  val=-13.065865  tf_ade=0.215 km  -.--- km(AR)  lr=1.75e-04
+  batch 309/3096  loss=-13.038207
+  batch 618/3096  loss=-13.038112
+  batch 927/3096  loss=-13.038283
+  batch 1236/3096  loss=-13.038323
+  batch 1545/3096  loss=-13.037967
+  batch 1854/3096  loss=-13.037875
+  batch 2163/3096  loss=-13.037935
+  batch 2472/3096  loss=-13.037948
+  batch 2781/3096  loss=-13.037752
+  batch 3090/3096  loss=-13.037809
+[P1] Epoch  47/60  train=-13.037793  val=-13.065593  tf_ade=0.255 km  -.--- km(AR)  lr=1.52e-04
+  batch 309/3096  loss=-13.039533
+  batch 618/3096  loss=-13.039669
+  batch 927/3096  loss=-13.038980
+  batch 1236/3096  loss=-13.038728
+  batch 1545/3096  loss=-13.038465
+  batch 1854/3096  loss=-13.038401
+  batch 2163/3096  loss=-13.038757
+  batch 2472/3096  loss=-13.038546
+  batch 2781/3096  loss=-13.038393
+  batch 3090/3096  loss=-13.038341
+[P1] Epoch  48/60  train=-13.038353  val=-13.065536  tf_ade=0.199 km  -.--- km(AR)  lr=1.30e-04
+  ✓ [P1] saved best (tf_ade=0.199 km)
+  batch 309/3096  loss=-13.037829
+  batch 618/3096  loss=-13.038269
+  batch 927/3096  loss=-13.038898
+  batch 1236/3096  loss=-13.038897
+  batch 1545/3096  loss=-13.039059
+  batch 1854/3096  loss=-13.038956
+  batch 2163/3096  loss=-13.038904
+  batch 2472/3096  loss=-13.038848
+  batch 2781/3096  loss=-13.038929
+  batch 3090/3096  loss=-13.038877
+[P1] Epoch  49/60  train=-13.038880  val=-13.065611  tf_ade=0.222 km  -.--- km(AR)  lr=1.10e-04
+  batch 309/3096  loss=-13.037858
+  batch 618/3096  loss=-13.037241
+  batch 927/3096  loss=-13.037429
+  batch 1236/3096  loss=-13.037548
+  batch 1545/3096  loss=-13.037407
+  batch 1854/3096  loss=-13.036980
+  batch 2163/3096  loss=-13.036669
+  batch 2472/3096  loss=-13.036422
+  batch 2781/3096  loss=-13.036579
+  batch 3090/3096  loss=-13.036666
+[P1] Epoch  50/60  train=-13.036666  val=-13.064254  tf_ade=0.433 km  2.516 km(AR)  lr=9.19e-05
+  batch 309/3096  loss=-13.036424
+  batch 618/3096  loss=-13.036111
+  batch 927/3096  loss=-13.035456
+  batch 1236/3096  loss=-13.035708
+  batch 1545/3096  loss=-13.035883
+  batch 1854/3096  loss=-13.036140
+  batch 2163/3096  loss=-13.036249
+  batch 2472/3096  loss=-13.036026
+  batch 2781/3096  loss=-13.036232
+  batch 3090/3096  loss=-13.036310
+[P1] Epoch  51/60  train=-13.036279  val=-13.064925  tf_ade=0.329 km  -.--- km(AR)  lr=7.49e-05
+  batch 309/3096  loss=-13.036364
+  batch 618/3096  loss=-13.036191
+  batch 927/3096  loss=-13.036040
+  batch 1236/3096  loss=-13.036488
+  batch 1545/3096  loss=-13.036260
+  batch 1854/3096  loss=-13.036508
+  batch 2163/3096  loss=-13.036331
+  batch 2472/3096  loss=-13.036431
+  batch 2781/3096  loss=-13.036498
+  batch 3090/3096  loss=-13.036567
+[P1] Epoch  52/60  train=-13.036603  val=-13.065050  tf_ade=0.259 km  -.--- km(AR)  lr=5.95e-05
+  batch 309/3096  loss=-13.035974
+  batch 618/3096  loss=-13.036530
+  batch 927/3096  loss=-13.036682
+  batch 1236/3096  loss=-13.036651
+  batch 1545/3096  loss=-13.036932
+  batch 1854/3096  loss=-13.036755
+  batch 2163/3096  loss=-13.036828
+  batch 2472/3096  loss=-13.037018
+  batch 2781/3096  loss=-13.036849
+  batch 3090/3096  loss=-13.036760
+[P1] Epoch  53/60  train=-13.036739  val=-13.064985  tf_ade=0.294 km  -.--- km(AR)  lr=4.58e-05
+  batch 309/3096  loss=-13.037639
+  batch 618/3096  loss=-13.036173
+  batch 927/3096  loss=-13.036034
+  batch 1236/3096  loss=-13.035883
+  batch 1545/3096  loss=-13.036045
+  batch 1854/3096  loss=-13.036282
+  batch 2163/3096  loss=-13.036551
+  batch 2472/3096  loss=-13.036615
+  batch 2781/3096  loss=-13.036865
+  batch 3090/3096  loss=-13.036774
+[P1] Epoch  54/60  train=-13.036777  val=-13.064739  tf_ade=0.247 km  -.--- km(AR)  lr=3.38e-05
+  batch 309/3096  loss=-13.038196
+  batch 618/3096  loss=-13.037824
+  batch 927/3096  loss=-13.037244
+  batch 1236/3096  loss=-13.037189
+  batch 1545/3096  loss=-13.037257
+  batch 1854/3096  loss=-13.037514
+  batch 2163/3096  loss=-13.037683
+  batch 2472/3096  loss=-13.037463
+  batch 2781/3096  loss=-13.037444
+  batch 3090/3096  loss=-13.037568
+[P1] Epoch  55/60  train=-13.037554  val=-13.065049  tf_ade=0.249 km  1.487 km(AR)  lr=2.35e-05
+  batch 309/3096  loss=-13.037541
+  batch 618/3096  loss=-13.037839
+  batch 927/3096  loss=-13.037801
+  batch 1236/3096  loss=-13.037896
+  batch 1545/3096  loss=-13.038430
+  batch 1854/3096  loss=-13.038676
+  batch 2163/3096  loss=-13.038502
+  batch 2472/3096  loss=-13.038415
+  batch 2781/3096  loss=-13.037989
+  batch 3090/3096  loss=-13.037831
+[P1] Epoch  56/60  train=-13.037823  val=-13.065106  tf_ade=0.207 km  -.--- km(AR)  lr=1.51e-05
+  batch 309/3096  loss=-13.038531
+  batch 618/3096  loss=-13.038521
+  batch 927/3096  loss=-13.038336
+  batch 1236/3096  loss=-13.038062
+  batch 1545/3096  loss=-13.038086
+  batch 1854/3096  loss=-13.038174
+  batch 2163/3096  loss=-13.038291
+  batch 2472/3096  loss=-13.038266
+  batch 2781/3096  loss=-13.038177
+  batch 3090/3096  loss=-13.038101
+[P1] Epoch  57/60  train=-13.038108  val=-13.065044  tf_ade=0.300 km  -.--- km(AR)  lr=8.52e-06
+  batch 309/3096  loss=-13.036570
+  batch 618/3096  loss=-13.037579
+  batch 927/3096  loss=-13.037419
+  batch 1236/3096  loss=-13.037502
+  batch 1545/3096  loss=-13.037471
+  batch 1854/3096  loss=-13.037922
+  batch 2163/3096  loss=-13.037749
+  batch 2472/3096  loss=-13.037918
+  batch 2781/3096  loss=-13.037936
+  batch 3090/3096  loss=-13.037977
+[P1] Epoch  58/60  train=-13.037978  val=-13.065068  tf_ade=0.234 km  -.--- km(AR)  lr=3.79e-06
+  batch 309/3096  loss=-13.037744
+  batch 618/3096  loss=-13.037374
+  batch 927/3096  loss=-13.038110
+  batch 1236/3096  loss=-13.038544
+  batch 1545/3096  loss=-13.038157
+  batch 1854/3096  loss=-13.038135
+  batch 2163/3096  loss=-13.038299
+  batch 2472/3096  loss=-13.038099
+  batch 2781/3096  loss=-13.038109
+  batch 3090/3096  loss=-13.038118
+[P1] Epoch  59/60  train=-13.038127  val=-13.065063  tf_ade=0.215 km  -.--- km(AR)  lr=9.52e-07
+  batch 309/3096  loss=-13.038437
+  batch 618/3096  loss=-13.038440
+  batch 927/3096  loss=-13.037932
+  batch 1236/3096  loss=-13.037994
+  batch 1545/3096  loss=-13.038218
+  batch 1854/3096  loss=-13.037934
+  batch 2163/3096  loss=-13.037955
+  batch 2472/3096  loss=-13.037974
+  batch 2781/3096  loss=-13.038091
+  batch 3090/3096  loss=-13.038116
+[P1] Epoch  60/60  train=-13.038113  val=-13.065063  tf_ade=0.215 km  1.351 km(AR)  lr=4.00e-09
+
+Phase 1 complete.  Best TF ADE: 0.199 km
+
+
+============================================================
+PHASE 2 — Autoregressive Fine-tuning
+  epochs=60  lr=5e-05  teacher=1.00→0.00 over 10 epochs
+  BPTT rollout from epoch 11 (teacher_prob=0)
+  Loading: checkpoints/best_model_phase1.pt
+============================================================
+
+  Loaded P1 checkpoint — epoch=48  tf_ade=0.199 km
+
+  batch 309/3096  loss=-13.035069
+  batch 618/3096  loss=-13.035433
+  batch 927/3096  loss=-13.034783
+  batch 1236/3096  loss=-13.034917
+  batch 1545/3096  loss=-13.035093
+  batch 1854/3096  loss=-13.034510
+  batch 2163/3096  loss=-13.034773
+  batch 2472/3096  loss=-13.034754
+  batch 2781/3096  loss=-13.034810
+  batch 3090/3096  loss=-13.034776
+[P2] Epoch   1/60  train=-13.034799  val=-13.065531  tf_ade=0.199 km  -.--- km(AR)  teacher=1.00  lr=4.97e-05
+  batch 309/3096  loss=-13.026568
+  batch 618/3096  loss=-13.027193
+  batch 927/3096  loss=-13.027109
+  batch 1236/3096  loss=-13.027110
+  batch 1545/3096  loss=-13.027328
+  batch 1854/3096  loss=-13.027182
+  batch 2163/3096  loss=-13.027108
+  batch 2472/3096  loss=-13.026882
+  batch 2781/3096  loss=-13.027181
+  batch 3090/3096  loss=-13.027315
+[P2] Epoch   2/60  train=-13.027301  val=-13.065774  tf_ade=0.199 km  1.251 km(AR)  teacher=0.90  lr=4.88e-05
+  ✓ [P2] saved best (ar_ade=1.251 km)
+  batch 309/3096  loss=-13.017451
+  batch 618/3096  loss=-13.017060
+  batch 927/3096  loss=-13.017795
+  batch 1236/3096  loss=-13.018105
+  batch 1545/3096  loss=-13.018232
+  batch 1854/3096  loss=-13.018359
+  batch 2163/3096  loss=-13.018421
+  batch 2472/3096  loss=-13.018561
+  batch 2781/3096  loss=-13.018819
+  batch 3090/3096  loss=-13.018781
+[P2] Epoch   3/60  train=-13.018785  val=-13.065897  tf_ade=0.199 km  -.--- km(AR)  teacher=0.80  lr=4.73e-05
+  batch 309/3096  loss=-13.007925
+  batch 618/3096  loss=-13.008230
+  batch 927/3096  loss=-13.008324
+  batch 1236/3096  loss=-13.007949
+  batch 1545/3096  loss=-13.008421
+  batch 1854/3096  loss=-13.008703
+  batch 2163/3096  loss=-13.008484
+  batch 2472/3096  loss=-13.008654
+  batch 2781/3096  loss=-13.008743
+  batch 3090/3096  loss=-13.008791
+[P2] Epoch   4/60  train=-13.008804  val=-13.065869  tf_ade=0.199 km  1.249 km(AR)  teacher=0.70  lr=4.53e-05
+  ✓ [P2] saved best (ar_ade=1.249 km)
+  batch 309/3096  loss=-12.996404
+  batch 618/3096  loss=-12.996338
+  batch 927/3096  loss=-12.997285
+  batch 1236/3096  loss=-12.997063
+  batch 1545/3096  loss=-12.996885
+  batch 1854/3096  loss=-12.996366
+  batch 2163/3096  loss=-12.996438
+  batch 2472/3096  loss=-12.996772
+  batch 2781/3096  loss=-12.996907
+  batch 3090/3096  loss=-12.996919
+[P2] Epoch   5/60  train=-12.996920  val=-13.065522  tf_ade=0.199 km  -.--- km(AR)  teacher=0.60  lr=4.28e-05
+  batch 309/3096  loss=-12.981046
+  batch 618/3096  loss=-12.980654
+  batch 927/3096  loss=-12.981222
+  batch 1236/3096  loss=-12.982213
+  batch 1545/3096  loss=-12.982599
+  batch 1854/3096  loss=-12.983255
+  batch 2163/3096  loss=-12.983289
+  batch 2472/3096  loss=-12.983276
+  batch 2781/3096  loss=-12.983479
+  batch 3090/3096  loss=-12.983633
+[P2] Epoch   6/60  train=-12.983646  val=-13.063937  tf_ade=0.250 km  1.457 km(AR)  teacher=0.50  lr=3.99e-05
+  batch 309/3096  loss=-12.973034
+  batch 618/3096  loss=-12.971566
+  batch 927/3096  loss=-12.970969
+  batch 1236/3096  loss=-12.971179
+  batch 1545/3096  loss=-12.971690
+  batch 1854/3096  loss=-12.970792
+  batch 2163/3096  loss=-12.970974
+  batch 2472/3096  loss=-12.970761
+  batch 2781/3096  loss=-12.970803
+  batch 3090/3096  loss=-12.971481
+[P2] Epoch   7/60  train=-12.971460  val=-13.062474  tf_ade=0.298 km  -.--- km(AR)  teacher=0.40  lr=3.66e-05
+  batch 309/3096  loss=-12.961002
+  batch 618/3096  loss=-12.959605
+  batch 927/3096  loss=-12.958225
+  batch 1236/3096  loss=-12.958148
+  batch 1545/3096  loss=-12.957339
+  batch 1854/3096  loss=-12.957523
+  batch 2163/3096  loss=-12.957080
+  batch 2472/3096  loss=-12.957610
+  batch 2781/3096  loss=-12.957683
+  batch 3090/3096  loss=-12.957666
+[P2] Epoch   8/60  train=-12.957694  val=-13.060378  tf_ade=0.305 km  1.762 km(AR)  teacher=0.30  lr=3.31e-05
+  batch 309/3096  loss=-12.935010
+  batch 618/3096  loss=-12.937585
+  batch 927/3096  loss=-12.937332
+  batch 1236/3096  loss=-12.938848
+  batch 1545/3096  loss=-12.939271
+  batch 1854/3096  loss=-12.939065
+  batch 2163/3096  loss=-12.939115
+  batch 2472/3096  loss=-12.938999
+  batch 2781/3096  loss=-12.939586
+  batch 3090/3096  loss=-12.940001
+[P2] Epoch   9/60  train=-12.940011  val=-13.055960  tf_ade=0.234 km  -.--- km(AR)  teacher=0.20  lr=2.93e-05
+  batch 309/3096  loss=-12.919026
+  batch 618/3096  loss=-12.920315
+  batch 927/3096  loss=-12.920646
+  batch 1236/3096  loss=-12.920780
+  batch 1545/3096  loss=-12.919905
+  batch 1854/3096  loss=-12.919402
+  batch 2163/3096  loss=-12.919115
+  batch 2472/3096  loss=-12.919208
+  batch 2781/3096  loss=-12.919141
+  batch 3090/3096  loss=-12.919432
+[P2] Epoch  10/60  train=-12.919431  val=-13.050837  tf_ade=0.219 km  1.241 km(AR)  teacher=0.10  lr=2.55e-05
+  ✓ [P2] saved best (ar_ade=1.241 km)
+  batch 309/3096  loss=-12.889513
+  batch 618/3096  loss=-12.891994
+  batch 927/3096  loss=-12.892785
+  batch 1236/3096  loss=-12.893427
+  batch 1545/3096  loss=-12.893003
+  batch 1854/3096  loss=-12.894075
+  batch 2163/3096  loss=-12.894031
+  batch 2472/3096  loss=-12.894088
+  batch 2781/3096  loss=-12.894210
+  batch 3090/3096  loss=-12.894412
+[P2] Epoch  11/60  train=-12.894374  val=-13.045503  tf_ade=0.230 km  -.--- km(AR)  teacher=0.00  lr=2.17e-05
+  batch 309/3096  loss=-12.896824
+  batch 618/3096  loss=-12.895830
+  batch 927/3096  loss=-12.895521
+  batch 1236/3096  loss=-12.895418
+  batch 1545/3096  loss=-12.895654
+  batch 1854/3096  loss=-12.895885
+  batch 2163/3096  loss=-12.896037
+  batch 2472/3096  loss=-12.896544
+  batch 2781/3096  loss=-12.896503
+  batch 3090/3096  loss=-12.896678
+[P2] Epoch  12/60  train=-12.896692  val=-13.045934  tf_ade=0.208 km  1.142 km(AR)  teacher=0.00  lr=1.79e-05
+  ✓ [P2] saved best (ar_ade=1.142 km)
+  batch 309/3096  loss=-12.896557
+  batch 618/3096  loss=-12.896479
+  batch 927/3096  loss=-12.897120
+  batch 1236/3096  loss=-12.897573
+  batch 1545/3096  loss=-12.897506
+  batch 1854/3096  loss=-12.898177
+  batch 2163/3096  loss=-12.898277
+  batch 2472/3096  loss=-12.897931
+  batch 2781/3096  loss=-12.898034
+  batch 3090/3096  loss=-12.897885
+[P2] Epoch  13/60  train=-12.897861  val=-13.044211  tf_ade=0.211 km  -.--- km(AR)  teacher=0.00  lr=1.44e-05
+  batch 309/3096  loss=-12.899288
+  batch 618/3096  loss=-12.899063
+  batch 927/3096  loss=-12.900209
+  batch 1236/3096  loss=-12.900066
+  batch 1545/3096  loss=-12.900382
+  batch 1854/3096  loss=-12.900186
+  batch 2163/3096  loss=-12.900418
+  batch 2472/3096  loss=-12.900157
+  batch 2781/3096  loss=-12.899949
+  batch 3090/3096  loss=-12.899481
+[P2] Epoch  14/60  train=-12.899451  val=-13.045395  tf_ade=0.206 km  1.123 km(AR)  teacher=0.00  lr=1.11e-05
+  ✓ [P2] saved best (ar_ade=1.123 km)
+  batch 309/3096  loss=-12.900225
+  batch 618/3096  loss=-12.902234
+  batch 927/3096  loss=-12.901102
+  batch 1236/3096  loss=-12.901592
+  batch 1545/3096  loss=-12.901219
+  batch 1854/3096  loss=-12.901161
+  batch 2163/3096  loss=-12.900413
+  batch 2472/3096  loss=-12.900353
+  batch 2781/3096  loss=-12.900158
+  batch 3090/3096  loss=-12.900138
+[P2] Epoch  15/60  train=-12.900164  val=-13.044817  tf_ade=0.202 km  -.--- km(AR)  teacher=0.00  lr=8.18e-06
+  batch 309/3096  loss=-12.902325
+  batch 618/3096  loss=-12.900646
+  batch 927/3096  loss=-12.900896
+  batch 1236/3096  loss=-12.901461
+  batch 1545/3096  loss=-12.901304
+  batch 1854/3096  loss=-12.901529
+  batch 2163/3096  loss=-12.901294
+  batch 2472/3096  loss=-12.900918
+  batch 2781/3096  loss=-12.901200
+  batch 3090/3096  loss=-12.900945
+[P2] Epoch  16/60  train=-12.900938  val=-13.043916  tf_ade=0.203 km  1.101 km(AR)  teacher=0.00  lr=5.68e-06
+  ✓ [P2] saved best (ar_ade=1.101 km)
+  batch 309/3096  loss=-12.900071
+  batch 618/3096  loss=-12.899996
+  batch 927/3096  loss=-12.901660
+  batch 1236/3096  loss=-12.901360
+  batch 1545/3096  loss=-12.901051
+  batch 1854/3096  loss=-12.901248
+  batch 2163/3096  loss=-12.901450
+  batch 2472/3096  loss=-12.901476
+  batch 2781/3096  loss=-12.901426
+  batch 3090/3096  loss=-12.901656
+[P2] Epoch  17/60  train=-12.901674  val=-13.044653  tf_ade=0.199 km  -.--- km(AR)  teacher=0.00  lr=3.67e-06
+  batch 309/3096  loss=-12.902710
+  batch 618/3096  loss=-12.902007
+  batch 927/3096  loss=-12.901661
+  batch 1236/3096  loss=-12.902110
+  batch 1545/3096  loss=-12.902156
+  batch 1854/3096  loss=-12.901932
+  batch 2163/3096  loss=-12.901868
+  batch 2472/3096  loss=-12.901922
+  batch 2781/3096  loss=-12.901974
+  batch 3090/3096  loss=-12.902059
+[P2] Epoch  18/60  train=-12.902060  val=-13.044007  tf_ade=0.199 km  1.073 km(AR)  teacher=0.00  lr=2.20e-06
+  ✓ [P2] saved best (ar_ade=1.073 km)
+  batch 309/3096  loss=-12.901039
+  batch 618/3096  loss=-12.902276
+  batch 927/3096  loss=-12.903499
+  batch 1236/3096  loss=-12.902879
+  batch 1545/3096  loss=-12.902278
+  batch 1854/3096  loss=-12.902546
+  batch 2163/3096  loss=-12.902275
+  batch 2472/3096  loss=-12.902076
+  batch 2781/3096  loss=-12.902108
+  batch 3090/3096  loss=-12.902397
+[P2] Epoch  19/60  train=-12.902433  val=-13.044417  tf_ade=0.201 km  -.--- km(AR)  teacher=0.00  lr=1.30e-06
+  batch 309/3096  loss=-12.900357
+  batch 618/3096  loss=-12.900970
+  batch 927/3096  loss=-12.901031
+  batch 1236/3096  loss=-12.902004
+  batch 1545/3096  loss=-12.902089
+  batch 1854/3096  loss=-12.902288
+  batch 2163/3096  loss=-12.902505
+  batch 2472/3096  loss=-12.902707
+  batch 2781/3096  loss=-12.902425
+  batch 3090/3096  loss=-12.902427
+[P2] Epoch  20/60  train=-12.902453  val=-13.044480  tf_ade=0.199 km  1.068 km(AR)  teacher=0.00  lr=5.00e-05
+  ✓ [P2] saved best (ar_ade=1.068 km)
+  batch 309/3096  loss=-12.898597
+  batch 618/3096  loss=-12.896461
+  batch 927/3096  loss=-12.895254
+  batch 1236/3096  loss=-12.895675
+  batch 1545/3096  loss=-12.895444
+  batch 1854/3096  loss=-12.896303
+  batch 2163/3096  loss=-12.895422
+  batch 2472/3096  loss=-12.895326
+  batch 2781/3096  loss=-12.894402
+  batch 3090/3096  loss=-12.892942
+[P2] Epoch  21/60  train=-12.892922  val=-13.042157  tf_ade=0.402 km  -.--- km(AR)  teacher=0.00  lr=4.97e-05
+  batch 309/3096  loss=-12.895532
+  batch 618/3096  loss=-12.894196
+  batch 927/3096  loss=-12.894356
+  batch 1236/3096  loss=-12.895156
+  batch 1545/3096  loss=-12.895237
+  batch 1854/3096  loss=-12.894500
+  batch 2163/3096  loss=-12.894526
+  batch 2472/3096  loss=-12.894224
+  batch 2781/3096  loss=-12.894686
+  batch 3090/3096  loss=-12.894815
+[P2] Epoch  22/60  train=-12.894803  val=-13.042004  tf_ade=0.252 km  1.309 km(AR)  teacher=0.00  lr=4.88e-05
+  batch 309/3096  loss=-12.895942
+  batch 618/3096  loss=-12.897803
+  batch 927/3096  loss=-12.898345
+  batch 1236/3096  loss=-12.898019
+  batch 1545/3096  loss=-12.897695
+  batch 1854/3096  loss=-12.897644
+  batch 2163/3096  loss=-12.897809
+  batch 2472/3096  loss=-12.897760
+  batch 2781/3096  loss=-12.897976
+  batch 3090/3096  loss=-12.898110
+[P2] Epoch  23/60  train=-12.898096  val=-13.043912  tf_ade=0.228 km  -.--- km(AR)  teacher=0.00  lr=4.73e-05
+  batch 309/3096  loss=-12.899161
+  batch 618/3096  loss=-12.900279
+  batch 927/3096  loss=-12.900364
+  batch 1236/3096  loss=-12.900165
+  batch 1545/3096  loss=-12.900117
+  batch 1854/3096  loss=-12.899529
+  batch 2163/3096  loss=-12.899694
+  batch 2472/3096  loss=-12.899636
+  batch 2781/3096  loss=-12.899847
+  batch 3090/3096  loss=-12.899894
+[P2] Epoch  24/60  train=-12.899844  val=-13.041379  tf_ade=0.244 km  1.250 km(AR)  teacher=0.00  lr=4.53e-05
+  batch 309/3096  loss=-12.902350
+  batch 618/3096  loss=-12.900396
+  batch 927/3096  loss=-12.900643
+  batch 1236/3096  loss=-12.900779
+  batch 1545/3096  loss=-12.900802
+  batch 1854/3096  loss=-12.900724
+  batch 2163/3096  loss=-12.901048
+  batch 2472/3096  loss=-12.900567
+  batch 2781/3096  loss=-12.900331
+  batch 3090/3096  loss=-12.900182
+[P2] Epoch  25/60  train=-12.900147  val=-13.043618  tf_ade=0.254 km  -.--- km(AR)  teacher=0.00  lr=4.28e-05
+  batch 309/3096  loss=-12.898367
+  batch 618/3096  loss=-12.899584
+  batch 927/3096  loss=-12.900008
+  batch 1236/3096  loss=-12.900365
+  batch 1545/3096  loss=-12.900652
+  batch 1854/3096  loss=-12.901018
+  batch 2163/3096  loss=-12.900917
+  batch 2472/3096  loss=-12.900728
+  batch 2781/3096  loss=-12.900645
+  batch 3090/3096  loss=-12.900771
+[P2] Epoch  26/60  train=-12.900792  val=-13.042129  tf_ade=0.283 km  1.401 km(AR)  teacher=0.00  lr=3.99e-05
+  batch 309/3096  loss=-12.903377
+  batch 618/3096  loss=-12.902299
+  batch 927/3096  loss=-12.902917
+  batch 1236/3096  loss=-12.902342
+  batch 1545/3096  loss=-12.902886
+  batch 1854/3096  loss=-12.902750
+  batch 2163/3096  loss=-12.902727
+  batch 2472/3096  loss=-12.902618
+  batch 2781/3096  loss=-12.902637
+  batch 3090/3096  loss=-12.902644
+[P2] Epoch  27/60  train=-12.902652  val=-13.041115  tf_ade=0.216 km  -.--- km(AR)  teacher=0.00  lr=3.66e-05
+  batch 309/3096  loss=-12.902646
+  batch 618/3096  loss=-12.902085
+  batch 927/3096  loss=-12.902648
+  batch 1236/3096  loss=-12.903117
+  batch 1545/3096  loss=-12.903401
+  batch 1854/3096  loss=-12.903073
+  batch 2163/3096  loss=-12.902761
+  batch 2472/3096  loss=-12.902853
+  batch 2781/3096  loss=-12.903093
+  batch 3090/3096  loss=-12.903507
+[P2] Epoch  28/60  train=-12.903503  val=-13.041635  tf_ade=0.234 km  1.183 km(AR)  teacher=0.00  lr=3.31e-05
+  batch 309/3096  loss=-12.903893
+  batch 618/3096  loss=-12.903940
+  batch 927/3096  loss=-12.904360
+  batch 1236/3096  loss=-12.904780
+  batch 1545/3096  loss=-12.904666
+  batch 1854/3096  loss=-12.904120
+  batch 2163/3096  loss=-12.904291
+  batch 2472/3096  loss=-12.903675
+  batch 2781/3096  loss=-12.903596
+  batch 3090/3096  loss=-12.903746
+[P2] Epoch  29/60  train=-12.903766  val=-13.042233  tf_ade=0.225 km  -.--- km(AR)  teacher=0.00  lr=2.93e-05
+  batch 309/3096  loss=-12.907607
+  batch 618/3096  loss=-12.907308
+  batch 927/3096  loss=-12.906492
+  batch 1236/3096  loss=-12.905968
+  batch 1545/3096  loss=-12.906235
+  batch 1854/3096  loss=-12.906031
+  batch 2163/3096  loss=-12.906106
+  batch 2472/3096  loss=-12.905820
+  batch 2781/3096  loss=-12.905900
+  batch 3090/3096  loss=-12.905286
+[P2] Epoch  30/60  train=-12.905259  val=-13.043610  tf_ade=0.242 km  1.206 km(AR)  teacher=0.00  lr=2.55e-05
+  batch 309/3096  loss=-12.904270
+  batch 618/3096  loss=-12.905316
+  batch 927/3096  loss=-12.904591
+  batch 1236/3096  loss=-12.904982
+  batch 1545/3096  loss=-12.905797
+  batch 1854/3096  loss=-12.905901
+  batch 2163/3096  loss=-12.905865
+  batch 2472/3096  loss=-12.905564
+  batch 2781/3096  loss=-12.905930
+  batch 3090/3096  loss=-12.905873
+[P2] Epoch  31/60  train=-12.905870  val=-13.042309  tf_ade=0.223 km  -.--- km(AR)  teacher=0.00  lr=2.17e-05
+  batch 309/3096  loss=-12.910504
+  batch 618/3096  loss=-12.907923
+  batch 927/3096  loss=-12.906261
+  batch 1236/3096  loss=-12.906520
+  batch 1545/3096  loss=-12.906611
+  batch 1854/3096  loss=-12.906549
+  batch 2163/3096  loss=-12.906552
+  batch 2472/3096  loss=-12.906448
+  batch 2781/3096  loss=-12.906216
+  batch 3090/3096  loss=-12.906318
+[P2] Epoch  32/60  train=-12.906342  val=-13.043594  tf_ade=0.218 km  1.069 km(AR)  teacher=0.00  lr=1.79e-05
+  batch 309/3096  loss=-12.905899
+  batch 618/3096  loss=-12.907184
+  batch 927/3096  loss=-12.907812
+  batch 1236/3096  loss=-12.907876
+  batch 1545/3096  loss=-12.908126
+  batch 1854/3096  loss=-12.908129
+  batch 2163/3096  loss=-12.907827
+  batch 2472/3096  loss=-12.907853
+  batch 2781/3096  loss=-12.907630
+  batch 3090/3096  loss=-12.907591
+[P2] Epoch  33/60  train=-12.907573  val=-13.041201  tf_ade=0.222 km  -.--- km(AR)  teacher=0.00  lr=1.44e-05
+  batch 309/3096  loss=-12.909493
+  batch 618/3096  loss=-12.908678
+  batch 927/3096  loss=-12.908412
+  batch 1236/3096  loss=-12.908640
+  batch 1545/3096  loss=-12.908219
+  batch 1854/3096  loss=-12.908004
+  batch 2163/3096  loss=-12.908264
+  batch 2472/3096  loss=-12.908526
+  batch 2781/3096  loss=-12.908518
+  batch 3090/3096  loss=-12.908411
+[P2] Epoch  34/60  train=-12.908410  val=-13.042582  tf_ade=0.234 km  1.147 km(AR)  teacher=0.00  lr=1.11e-05
+  batch 309/3096  loss=-12.909738
+  batch 618/3096  loss=-12.907763
+  batch 927/3096  loss=-12.909219
+  batch 1236/3096  loss=-12.908538
+  batch 1545/3096  loss=-12.908861
+  batch 1854/3096  loss=-12.908939
+  batch 2163/3096  loss=-12.908832
+  batch 2472/3096  loss=-12.908830
+  batch 2781/3096  loss=-12.908706
+  batch 3090/3096  loss=-12.908929
+[P2] Epoch  35/60  train=-12.908915  val=-13.042539  tf_ade=0.224 km  -.--- km(AR)  teacher=0.00  lr=8.18e-06
+  batch 309/3096  loss=-12.908313
+  batch 618/3096  loss=-12.909790
+  batch 927/3096  loss=-12.910483
+  batch 1236/3096  loss=-12.910569
+  batch 1545/3096  loss=-12.910384
+  batch 1854/3096  loss=-12.910015
+  batch 2163/3096  loss=-12.909878
+  batch 2472/3096  loss=-12.909519
+  batch 2781/3096  loss=-12.909493
+  batch 3090/3096  loss=-12.909410
+[P2] Epoch  36/60  train=-12.909381  val=-13.042346  tf_ade=0.218 km  1.045 km(AR)  teacher=0.00  lr=5.68e-06
+  ✓ [P2] saved best (ar_ade=1.045 km)
+  batch 309/3096  loss=-12.910324
+  batch 618/3096  loss=-12.910943
+  batch 927/3096  loss=-12.909872
+  batch 1236/3096  loss=-12.909617
+  batch 1545/3096  loss=-12.909428
+  batch 1854/3096  loss=-12.909937
+  batch 2163/3096  loss=-12.910075
+  batch 2472/3096  loss=-12.910138
+  batch 2781/3096  loss=-12.910099
+  batch 3090/3096  loss=-12.909957
+[P2] Epoch  37/60  train=-12.909945  val=-13.042580  tf_ade=0.217 km  -.--- km(AR)  teacher=0.00  lr=3.67e-06
+  batch 309/3096  loss=-12.911643
+  batch 618/3096  loss=-12.910965
+  batch 927/3096  loss=-12.909183
+  batch 1236/3096  loss=-12.909321
+  batch 1545/3096  loss=-12.909799
+  batch 1854/3096  loss=-12.909703
+  batch 2163/3096  loss=-12.909938
+  batch 2472/3096  loss=-12.910055
+  batch 2781/3096  loss=-12.910010
+  batch 3090/3096  loss=-12.910074
+[P2] Epoch  38/60  train=-12.910076  val=-13.042734  tf_ade=0.212 km  1.020 km(AR)  teacher=0.00  lr=2.20e-06
+  ✓ [P2] saved best (ar_ade=1.020 km)
+  batch 309/3096  loss=-12.910355
+  batch 618/3096  loss=-12.909735
+  batch 927/3096  loss=-12.909906
+  batch 1236/3096  loss=-12.909952
+  batch 1545/3096  loss=-12.909841
+  batch 1854/3096  loss=-12.909918
+  batch 2163/3096  loss=-12.910111
+  batch 2472/3096  loss=-12.910026
+  batch 2781/3096  loss=-12.910223
+  batch 3090/3096  loss=-12.910391
+[P2] Epoch  39/60  train=-12.910402  val=-13.043282  tf_ade=0.210 km  -.--- km(AR)  teacher=0.00  lr=1.30e-06
+  batch 309/3096  loss=-12.912431
+  batch 618/3096  loss=-12.910994
+  batch 927/3096  loss=-12.911338
+  batch 1236/3096  loss=-12.911033
+  batch 1545/3096  loss=-12.910641
+  batch 1854/3096  loss=-12.910700
+  batch 2163/3096  loss=-12.910293
+  batch 2472/3096  loss=-12.910525
+  batch 2781/3096  loss=-12.910487
+  batch 3090/3096  loss=-12.910524
+[P2] Epoch  40/60  train=-12.910528  val=-13.042844  tf_ade=0.222 km  1.080 km(AR)  teacher=0.00  lr=5.00e-05
+  batch 309/3096  loss=-12.907944
+  batch 618/3096  loss=-12.905340
+  batch 927/3096  loss=-12.905173
+  batch 1236/3096  loss=-12.905052
+  batch 1545/3096  loss=-12.904302
+  batch 1854/3096  loss=-12.904219
+  batch 2163/3096  loss=-12.903830
+  batch 2472/3096  loss=-12.903926
+  batch 2781/3096  loss=-12.903672
+  batch 3090/3096  loss=-12.903765
+[P2] Epoch  41/60  train=-12.903723  val=-13.041947  tf_ade=0.375 km  -.--- km(AR)  teacher=0.00  lr=4.97e-05
+  batch 309/3096  loss=-12.902421
+  batch 618/3096  loss=-12.903159
+  batch 927/3096  loss=-12.903358
+  batch 1236/3096  loss=-12.903430
+  batch 1545/3096  loss=-12.903795
+  batch 1854/3096  loss=-12.903903
+  batch 2163/3096  loss=-12.903831
+  batch 2472/3096  loss=-12.904014
+  batch 2781/3096  loss=-12.904175
+  batch 3090/3096  loss=-12.903915
+[P2] Epoch  42/60  train=-12.903948  val=-13.040457  tf_ade=0.227 km  1.097 km(AR)  teacher=0.00  lr=4.88e-05
+  batch 309/3096  loss=-12.905944
+  batch 618/3096  loss=-12.907133
+  batch 927/3096  loss=-12.906776
+  batch 1236/3096  loss=-12.906325
+  batch 1545/3096  loss=-12.905435
+  batch 1854/3096  loss=-12.905636
+  batch 2163/3096  loss=-12.905020
+  batch 2472/3096  loss=-12.904412
+  batch 2781/3096  loss=-12.904288
+  batch 3090/3096  loss=-12.903637
+[P2] Epoch  43/60  train=-12.903659  val=-13.041305  tf_ade=0.233 km  -.--- km(AR)  teacher=0.00  lr=4.73e-05
+  batch 309/3096  loss=-12.906524
+  batch 618/3096  loss=-12.907257
+  batch 927/3096  loss=-12.907328
+  batch 1236/3096  loss=-12.906134
+  batch 1545/3096  loss=-12.906346
+  batch 1854/3096  loss=-12.906244
+  batch 2163/3096  loss=-12.906177
+  batch 2472/3096  loss=-12.906423
+  batch 2781/3096  loss=-12.906518
+  batch 3090/3096  loss=-12.906624
+[P2] Epoch  44/60  train=-12.906607  val=-13.040420  tf_ade=0.289 km  1.428 km(AR)  teacher=0.00  lr=4.53e-05
+  batch 309/3096  loss=-12.901973
+  batch 618/3096  loss=-12.905056
+  batch 927/3096  loss=-12.905523
+  batch 1236/3096  loss=-12.905504
+  batch 1545/3096  loss=-12.906039
+  batch 1854/3096  loss=-12.906451
+  batch 2163/3096  loss=-12.906496
+  batch 2472/3096  loss=-12.906321
+  batch 2781/3096  loss=-12.906297
+  batch 3090/3096  loss=-12.906721
+[P2] Epoch  45/60  train=-12.906725  val=-13.041703  tf_ade=0.320 km  -.--- km(AR)  teacher=0.00  lr=4.28e-05
+  batch 309/3096  loss=-12.909809
+  batch 618/3096  loss=-12.907096
+  batch 927/3096  loss=-12.906372
+  batch 1236/3096  loss=-12.906785
+  batch 1545/3096  loss=-12.906808
+  batch 1854/3096  loss=-12.906926
+  batch 2163/3096  loss=-12.906900
+  batch 2472/3096  loss=-12.906621
+  batch 2781/3096  loss=-12.906524
+  batch 3090/3096  loss=-12.906559
+[P2] Epoch  46/60  train=-12.906578  val=-13.042308  tf_ade=0.286 km  1.406 km(AR)  teacher=0.00  lr=3.99e-05
+  batch 309/3096  loss=-12.908984
+  batch 618/3096  loss=-12.907934
+  batch 927/3096  loss=-12.907925
+  batch 1236/3096  loss=-12.907309
+  batch 1545/3096  loss=-12.906892
+  batch 1854/3096  loss=-12.906601
+  batch 2163/3096  loss=-12.906911
+  batch 2472/3096  loss=-12.907273
+  batch 2781/3096  loss=-12.907403
+  batch 3090/3096  loss=-12.906681
+[P2] Epoch  47/60  train=-12.906691  val=-13.041419  tf_ade=0.218 km  -.--- km(AR)  teacher=0.00  lr=3.66e-05
+  batch 309/3096  loss=-12.907784
+  batch 618/3096  loss=-12.906770
+  batch 927/3096  loss=-12.907530
+  batch 1236/3096  loss=-12.907662
+  batch 1545/3096  loss=-12.908282
+  batch 1854/3096  loss=-12.908520
+  batch 2163/3096  loss=-12.908923
+  batch 2472/3096  loss=-12.908897
+  batch 2781/3096  loss=-12.909207
+  batch 3090/3096  loss=-12.909269
+[P2] Epoch  48/60  train=-12.909285  val=-13.040183  tf_ade=0.239 km  1.144 km(AR)  teacher=0.00  lr=3.31e-05
+  batch 309/3096  loss=-12.907211
+  batch 618/3096  loss=-12.909493
+  batch 927/3096  loss=-12.909476
+  batch 1236/3096  loss=-12.910011
+  batch 1545/3096  loss=-12.909997
+  batch 1854/3096  loss=-12.909700
+  batch 2163/3096  loss=-12.910100
+  batch 2472/3096  loss=-12.910112
+  batch 2781/3096  loss=-12.909906
+  batch 3090/3096  loss=-12.909741
+[P2] Epoch  49/60  train=-12.909760  val=-13.041471  tf_ade=0.260 km  -.--- km(AR)  teacher=0.00  lr=2.93e-05
+  batch 309/3096  loss=-12.910936
+  batch 618/3096  loss=-12.910692
+  batch 927/3096  loss=-12.911129
+  batch 1236/3096  loss=-12.911216
+  batch 1545/3096  loss=-12.911315
+  batch 1854/3096  loss=-12.911225
+  batch 2163/3096  loss=-12.910979
+  batch 2472/3096  loss=-12.911040
+  batch 2781/3096  loss=-12.911119
+  batch 3090/3096  loss=-12.910703
+[P2] Epoch  50/60  train=-12.910737  val=-13.043162  tf_ade=0.221 km  1.018 km(AR)  teacher=0.00  lr=2.55e-05
+  ✓ [P2] saved best (ar_ade=1.018 km)
+  batch 309/3096  loss=-12.910961
+  batch 618/3096  loss=-12.910658
+  batch 927/3096  loss=-12.910746
+  batch 1236/3096  loss=-12.910747
+  batch 1545/3096  loss=-12.910555
+  batch 1854/3096  loss=-12.910364
+  batch 2163/3096  loss=-12.910842
+  batch 2472/3096  loss=-12.911115
+  batch 2781/3096  loss=-12.911115
+  batch 3090/3096  loss=-12.911372
+[P2] Epoch  51/60  train=-12.911320  val=-13.042161  tf_ade=0.229 km  -.--- km(AR)  teacher=0.00  lr=2.17e-05
+  batch 309/3096  loss=-12.912166
+  batch 618/3096  loss=-12.913044
+  batch 927/3096  loss=-12.912576
+  batch 1236/3096  loss=-12.912103
+  batch 1545/3096  loss=-12.912168
+  batch 1854/3096  loss=-12.911816
+  batch 2163/3096  loss=-12.911950
+  batch 2472/3096  loss=-12.912006
+  batch 2781/3096  loss=-12.912010
+  batch 3090/3096  loss=-12.912035
+[P2] Epoch  52/60  train=-12.912039  val=-13.042058  tf_ade=0.269 km  1.297 km(AR)  teacher=0.00  lr=1.79e-05
+  batch 309/3096  loss=-12.912680
+  batch 618/3096  loss=-12.911844
+  batch 927/3096  loss=-12.912433
+  batch 1236/3096  loss=-12.912664
+  batch 1545/3096  loss=-12.912526
+  batch 1854/3096  loss=-12.912576
+  batch 2163/3096  loss=-12.912923
+  batch 2472/3096  loss=-12.912867
+  batch 2781/3096  loss=-12.912587
+  batch 3090/3096  loss=-12.912599
+[P2] Epoch  53/60  train=-12.912595  val=-13.042135  tf_ade=0.230 km  -.--- km(AR)  teacher=0.00  lr=1.44e-05
+  batch 309/3096  loss=-12.916640
+  batch 618/3096  loss=-12.916143
+  batch 927/3096  loss=-12.914793
+  batch 1236/3096  loss=-12.914199
+  batch 1545/3096  loss=-12.914031
+  batch 1854/3096  loss=-12.913698
+  batch 2163/3096  loss=-12.913420
+  batch 2472/3096  loss=-12.913193
+  batch 2781/3096  loss=-12.913433
+  batch 3090/3096  loss=-12.913299
+[P2] Epoch  54/60  train=-12.913312  val=-13.041829  tf_ade=0.262 km  1.256 km(AR)  teacher=0.00  lr=1.11e-05
+  batch 309/3096  loss=-12.912855
+  batch 618/3096  loss=-12.915158
+  batch 927/3096  loss=-12.914137
+  batch 1236/3096  loss=-12.913945
+  batch 1545/3096  loss=-12.913637
+  batch 1854/3096  loss=-12.913716
+  batch 2163/3096  loss=-12.913800
+  batch 2472/3096  loss=-12.913987
+  batch 2781/3096  loss=-12.913826
+  batch 3090/3096  loss=-12.913737
+[P2] Epoch  55/60  train=-12.913708  val=-13.041813  tf_ade=0.218 km  -.--- km(AR)  teacher=0.00  lr=8.18e-06
+  batch 309/3096  loss=-12.911451
+  batch 618/3096  loss=-12.913564
+  batch 927/3096  loss=-12.913856
+  batch 1236/3096  loss=-12.914113
+  batch 1545/3096  loss=-12.914502
+  batch 1854/3096  loss=-12.914337
+  batch 2163/3096  loss=-12.914777
+  batch 2472/3096  loss=-12.914566
+  batch 2781/3096  loss=-12.914469
+  batch 3090/3096  loss=-12.914467
+[P2] Epoch  56/60  train=-12.914491  val=-13.043147  tf_ade=0.225 km  1.036 km(AR)  teacher=0.00  lr=5.68e-06
+  batch 309/3096  loss=-12.912600
+  batch 618/3096  loss=-12.913690
+  batch 927/3096  loss=-12.913920
+  batch 1236/3096  loss=-12.914311
+  batch 1545/3096  loss=-12.914389
+  batch 1854/3096  loss=-12.914215
+  batch 2163/3096  loss=-12.914191
+  batch 2472/3096  loss=-12.914238
+  batch 2781/3096  loss=-12.914600
+  batch 3090/3096  loss=-12.914812
+[P2] Epoch  57/60  train=-12.914810  val=-13.042891  tf_ade=0.218 km  -.--- km(AR)  teacher=0.00  lr=3.67e-06
+  batch 309/3096  loss=-12.915605
+  batch 618/3096  loss=-12.914499
+  batch 927/3096  loss=-12.914516
+  batch 1236/3096  loss=-12.914475
+  batch 1545/3096  loss=-12.914947
+  batch 1854/3096  loss=-12.915168
+  batch 2163/3096  loss=-12.915090
+  batch 2472/3096  loss=-12.915249
+  batch 2781/3096  loss=-12.915224
+  batch 3090/3096  loss=-12.915199
+[P2] Epoch  58/60  train=-12.915219  val=-13.043186  tf_ade=0.234 km  1.099 km(AR)  teacher=0.00  lr=2.20e-06
+  batch 309/3096  loss=-12.916561
+  batch 618/3096  loss=-12.916444
+  batch 927/3096  loss=-12.915735
+  batch 1236/3096  loss=-12.915615
+  batch 1545/3096  loss=-12.915858
+  batch 1854/3096  loss=-12.915857
+  batch 2163/3096  loss=-12.915677
+  batch 2472/3096  loss=-12.915485
+  batch 2781/3096  loss=-12.915460
+  batch 3090/3096  loss=-12.915491
+[P2] Epoch  59/60  train=-12.915466  val=-13.042058  tf_ade=0.217 km  -.--- km(AR)  teacher=0.00  lr=1.30e-06
+  batch 309/3096  loss=-12.913688
+  batch 618/3096  loss=-12.914637
+  batch 927/3096  loss=-12.915614
+  batch 1236/3096  loss=-12.915461
+  batch 1545/3096  loss=-12.915481
+  batch 1854/3096  loss=-12.915485
+  batch 2163/3096  loss=-12.915472
+  batch 2472/3096  loss=-12.915662
+  batch 2781/3096  loss=-12.915656
+  batch 3090/3096  loss=-12.915691
+[P2] Epoch  60/60  train=-12.915691  val=-13.042582  tf_ade=0.217 km  0.991 km(AR)  teacher=0.00  lr=5.00e-05
+  ✓ [P2] saved best (ar_ade=0.991 km)
+
+Phase 2 complete.  Best AR ADE: 0.991 km
+
+Training complete (120 epochs run).  Log saved to logs/train_20260717_020812.log
+Curves : logs/train_20260717_020812_curves.png
+History: logs/train_20260717_020812_history.csv

@@ -4,36 +4,14 @@ utils.py
 Shared helper functions used across dataset, training, and prediction.
 """
 
-import math
 import os
 import numpy as np
 import torch
-import matplotlib.path as _mplpath
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Distance metric
 # ─────────────────────────────────────────────────────────────────────────────
-
-def haversine_km(lat1, lon1, lat2, lon2):
-    """
-    Great-circle distance between two points on Earth in kilometres.
-
-    Uses the Haversine formula which accounts for Earth's spherical shape.
-    This is the standard metric for evaluating trajectory prediction accuracy.
-
-    Inputs can be scalars or numpy arrays (vectorised).
-    All angles in DEGREES (converted internally to radians).
-    """
-    R = 6371.0  # Earth radius in km
-
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-
-    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
-    return 2 * R * np.arcsin(np.sqrt(a))
-
 
 def haversine_tensor(pred, target):
     """
@@ -57,59 +35,6 @@ def haversine_tensor(pred, target):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Normalisation
-# ─────────────────────────────────────────────────────────────────────────────
-
-class MinMaxScaler:
-    """
-    Scales each feature column independently to the range [0, 1].
-
-    fit()       — compute min and max from training data
-    transform() — apply the scaling
-    inverse_transform() — undo the scaling (needed to read predictions)
-
-    We normalise inputs because neural networks train better when values
-    are small and centred.  Without this, the raw lat/lon numbers (~50, ~10)
-    and COG (~0–360) are on very different scales, making training unstable.
-    """
-
-    def __init__(self):
-        self.min_ = None
-        self.max_ = None
-
-    def fit(self, data: np.ndarray):
-        """data : (N, n_features)"""
-        self.min_ = data.min(axis=0)
-        self.max_ = data.max(axis=0)
-        # Avoid division by zero for constant features
-        self.range_ = np.where(self.max_ - self.min_ == 0, 1.0, self.max_ - self.min_)
-        return self
-
-    def transform(self, data: np.ndarray) -> np.ndarray:
-        return (data - self.min_) / self.range_
-
-    def inverse_transform(self, data: np.ndarray) -> np.ndarray:
-        return data * self.range_ + self.min_
-
-    def inverse_transform_tensor(self, t: torch.Tensor) -> np.ndarray:
-        """Convenience: accepts a torch tensor, returns numpy array."""
-        arr = t.detach().cpu().numpy()
-        return self.inverse_transform(arr)
-
-    def save(self, path: str):
-        np.savez(path, min_=self.min_, max_=self.max_, range_=self.range_)
-
-    @classmethod
-    def load(cls, path: str) -> "MinMaxScaler":
-        d = np.load(path)
-        scaler = cls()
-        scaler.min_   = d["min_"]
-        scaler.max_   = d["max_"]
-        scaler.range_ = d["range_"]
-        return scaler
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Reproducibility
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -126,9 +51,12 @@ def set_seed(seed: int = 42):
 # Water mask  (OSM land polygons + OSM inland waterways)
 # ─────────────────────────────────────────────────────────────────────────────
 
-WATER_MASK_CACHE   = "data/water_mask.npz"
+# Data lives in the sibling DataHandling/ folder; shared land reference data
+# (water mask + OSM land polygons) sits in its Land/ subfolder.
+_DATA              = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "DataHandling"))
+WATER_MASK_CACHE   = os.path.join(_DATA, "Land", "water_mask.npz")
 WATER_MASK_RES     = 0.005  # degrees per cell (~500 m at these latitudes)
-_OSM_LAND_DIR      = "data/osm_land"
+_OSM_LAND_DIR      = os.path.join(_DATA, "Land", "osm_land")
 _OSM_LAND_SHP      = os.path.join(_OSM_LAND_DIR,
                          "simplified-land-polygons-complete-3857",
                          "simplified_land_polygons.shp")
@@ -139,11 +67,9 @@ _OSM_LAND_URL      = ("https://osmdata.openstreetmap.de/download/"
 
 
 def _get_osm_land_shp() -> str:
-    """Download and unzip the OSM simplified land polygon shapefile if not cached.
+    """Download and unzip the OSM land-polygon shapefile if not already cached.
 
-    This is the same vector data the OSM tile servers (and Folium) render from.
-    Zip is ~60 MB, extracted ~150 MB.  One-time download; subsequent calls are
-    instant (file existence check).
+    Same vector data the OSM tile servers render from. One-time ~60 MB download.
     """
     if os.path.exists(_OSM_LAND_SHP):
         return _OSM_LAND_SHP
@@ -273,18 +199,10 @@ def build_water_raster(
 ) -> tuple:
     """Build, save, and return a binary water raster for the given region.
 
-    Strategy
-    --------
-    1. OSM simplified land polygons (same source as Folium/OSM tile rendering)
-       establish an accurate coastline.
-    2. OSM waterways (canals, rivers, docks, harbours) downloaded via osmnx and
-       burned as water overrides.  Line features buffered by 2 cells so narrow
-       channels (Kiel Canal, Limfjord, Randers Fjord, etc.) are fully opened.
-    3. AIS track correction — every cell visited by any ship track (train/val/test)
-       is forced to water, with a 3-cell dilation to cover full channel width.
-
-    Returns (raster, lat_lo, lon_lo) where raster is (H, W) bool, True = water.
-    Requires: pip install geopandas osmnx
+    Built in three passes: (1) OSM land polygons set the coastline, (2) OSM
+    waterways (canals, rivers, docks) are burned back in as water, (3) any cell a
+    ship track visits is forced to water. Returns (raster, lat_lo, lon_lo) with
+    raster (H, W) bool, True = water. Requires: pip install geopandas osmnx
     """
     try:
         import geopandas as gpd
@@ -337,7 +255,7 @@ def _apply_track_corrections(
     lat_lo: float,
     lon_lo: float,
     res: float,
-    meta_path:   str = "data/dataset_meta.json",
+    meta_path:   str = os.path.join(_DATA, "training", "dataset_meta.json"),
     buffer_cells: int = 3,
 ) -> np.ndarray:
     """Override land cells that lie on recorded ship tracks with water.
@@ -365,9 +283,9 @@ def _apply_track_corrections(
     H, W_rast = raster.shape
 
     splits = [
-        ("data/train_windows.bin", meta.get("n_train", 0)),
-        ("data/val_windows.bin",   meta.get("n_val",   0)),
-        ("data/test_windows.bin",  meta.get("n_test",  0)),
+        (os.path.join(_DATA, "training", "train_windows.bin"), meta.get("n_train", 0)),
+        (os.path.join(_DATA, "training", "val_windows.bin"),   meta.get("n_val",   0)),
+        (os.path.join(_DATA, "training", "test_windows.bin"),  meta.get("n_test",  0)),
     ]
 
     visited = np.zeros((H, W_rast), dtype=bool)

@@ -1,0 +1,67 @@
+
+======================================================================
+  AIS DATASET — EXPLORATORY DATA ANALYSIS
+======================================================================
+
+  Training DB : /home/aclark/alfie/fyp/DataHandling/training/dma.db
+  Hold-out DB : /home/aclark/alfie/fyp/DataHandling/testing/2023.db
+
+  Scanning training database ...
+    per-day counts ...
+    per-vessel counts ...
+    fault flags ...
+    vessel types ...
+
+  Scanning hold-out database ...
+    per-day counts ...
+    per-vessel counts ...
+
+  Rebuilding trajectories for 2500 sampled vessels ...
+      250/2500 vessels  (483s)
+      500/2500 vessels  (1001s)
+      750/2500 vessels  (1408s)
+      1000/2500 vessels  (1812s)
+      1250/2500 vessels  (2192s)
+      1500/2500 vessels  (2658s)
+      1750/2500 vessels  (2959s)
+      2000/2500 vessels  (3415s)
+      2250/2500 vessels  (3922s)
+      2500/2500 vessels  (4584s)
+
+  Cached -> /home/aclark/alfie/fyp/ShipTransformer/eda/figures/_eda_cache.npz
+
+  Drawing raw-dataset figures ...
+    saved  01_dataset_summary.png
+    saved  02_data_volume.png
+    saved  03_temporal_coverage.png
+    saved  04_data_quality.png
+    saved  05_vessel_types.png
+    saved  06_reporting_interval.png
+    saved  07_speed_raw.png
+    saved  08_reports_per_vessel.png
+    saved  09_vessel_overlap.png
+    saved  10_preprocessing_funnel.png
+
+  Drawing processed-dataset figures ...
+    saved  11_density_heatmap.png
+    saved  12_position_scatter.png
+    saved  13_sample_trajectories.png
+    saved  14_individual_voyage.png
+    saved  15_voyage_length.png
+    saved  16_dt_histogram.png
+    saved  17_sog_histogram.png
+    saved  18_cog_histogram.png
+    saved  19_heading_histogram.png
+    saved  20_rot_histogram.png
+    saved  21_correlation_matrix.png
+    saved  22_sog_boxplot.png
+    saved  23_rot_boxplot.png
+
+  ── Key figures ──
+    Training   : 382,045,764 reports, 58,689 vessels, 2024-01-01 → 2025-12-31
+    Hold-out   : 24,705,619 reports, 9,881 vessels, 2023-01-01 → 2023-02-28
+    Reporting  : every 5.2 min → 7.8 h of history, 52 min predicted
+    Stationary : 60% of reports (filtered out)
+    Faulty     : 0.19% of reports (filtered out)
+    Overlap    : 8,115 of 9,881 hold-out vessels (82%) also appear in training
+    Voyages    : 33,045 sampled, median 67 pings

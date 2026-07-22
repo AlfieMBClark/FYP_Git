@@ -8,19 +8,20 @@ Phase 1 — TF Convergence (cfg.phase1_epochs)
     predictive accuracy and saves the best checkpoint by TF ADE.
 
 Phase 2 — AR Fine-tuning (cfg.phase2_epochs)
-    Loads the Phase 1 best checkpoint.  teacher_prob=0 from epoch 1 — every
+    Loads the Phase 1 best checkpoint.  teacher_prob anneals from 1.0 to 0.0 over
+    the first cfg.phase2_teacher_anneal_epochs epochs, then stays at 0.0 — every
     decoder input token is the model's own previous prediction, exactly as at
-    inference.  Uses a fresh CosineAnnealingLR starting at cfg.phase2_lr so the
-    model has a stable, meaningful gradient signal throughout (unlike a single-
-    phase run where OneCycleLR dies off just as SS gets most aggressive).
-    Saves the best checkpoint by AR ADE.
+    inference.  Uses CosineAnnealingWarmRestarts so the learning rate keeps
+    cycling instead of decaying to zero before training finishes.  Saves the
+    best checkpoint by AR ADE.
 
-Note: Phase 2 training is ~10x slower per epoch than Phase 1 because each batch
-requires 9 extra no-grad forward passes to build the fully-AR decoder input.
+Note: Phase 2 is much slower per epoch than Phase 1 because each batch unrolls
+the full decode step by step to build the autoregressive decoder input.
 
 All output is tee'd to a timestamped log file in logs/.
 """
 
+import csv
 import os
 import sys
 import numpy as np
@@ -28,6 +29,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from datetime import datetime
+
+# dataset.py lives in the sibling DataHandling/ folder.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "DataHandling")))
+
 from config  import cfg
 from model   import ShipTrajectoryTransformer
 from dataset import load_data
@@ -71,6 +76,102 @@ class _Tee:
         return self._stream.isatty()
 
 
+# ── Training curves ───────────────────────────────────────────────────────────
+
+class TrainingCurves:
+    """Per-epoch metrics: appends to a CSV and re-renders a PNG after every epoch.
+
+    The plot is written to disk rather than shown in a window (matplotlib's Agg
+    backend), so this works fine on a headless box — open the PNG and it refreshes
+    as training goes.  The CSV keeps the raw numbers for writing up results.
+
+    val_ade_ar and teacher_prob are only recorded on some epochs; missing points
+    are skipped rather than plotted as zero.
+    """
+
+    FIELDS = ["epoch", "phase", "train_loss", "val_loss",
+              "val_ade_tf", "val_ade_ar", "teacher_prob", "lr"]
+
+    def __init__(self, csv_path: str, png_path: str):
+        self.csv_path = csv_path
+        self.png_path = png_path
+        self.rows: list[dict] = []
+
+    def log(self, **metrics) -> None:
+        self.rows.append({f: metrics.get(f) for f in self.FIELDS})
+        self._write_csv()
+        self._save_png()
+
+    def _write_csv(self) -> None:
+        with open(self.csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=self.FIELDS)
+            writer.writeheader()
+            writer.writerows(self.rows)
+
+    def _series(self, key: str):
+        """(epochs, values) for one metric, skipping epochs where it wasn't recorded."""
+        points = [(r["epoch"], r[key]) for r in self.rows if r.get(key) is not None]
+        return [p[0] for p in points], [p[1] for p in points]
+
+    def best_epoch(self):
+        """Epoch with the lowest AR ADE — the checkpoint Phase 2 actually keeps."""
+        epochs, values = self._series("val_ade_ar")
+        return epochs[values.index(min(values))] if values else None
+
+    def _save_png(self) -> None:
+        try:
+            import matplotlib
+            matplotlib.use("Agg")          # headless: render to file, never to a window
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return   # no matplotlib — the CSV is still written
+
+        fig, (ax_loss, ax_err, ax_lr, ax_tf) = plt.subplots(
+            4, 1, figsize=(10, 11), sharex=True,
+        )
+
+        for key, label in [("train_loss", "train"), ("val_loss", "validation")]:
+            ax_loss.plot(*self._series(key), marker="o", ms=3, lw=1.5, label=label)
+        ax_loss.set_title("Loss", loc="left", fontsize=10)
+        ax_loss.set_ylabel("weighted NLL")
+
+        # The gap between these two curves is exactly what Phase 2 exists to close.
+        for key, label in [("val_ade_tf", "ADE (teacher-forced)"),
+                           ("val_ade_ar", "ADE (autoregressive)")]:
+            ax_err.plot(*self._series(key), marker="o", ms=3, lw=1.5, label=label)
+        ax_err.set_title("Validation position error", loc="left", fontsize=10)
+        ax_err.set_ylabel("km")
+
+        ax_lr.plot(*self._series("lr"), marker="o", ms=3, lw=1.5, label="learning rate")
+        ax_lr.set_yscale("log")
+        ax_lr.set_title("Learning rate", loc="left", fontsize=10)
+        ax_lr.set_ylabel("lr")
+
+        ax_tf.plot(*self._series("teacher_prob"), marker="o", ms=3, lw=1.5,
+                   label="teacher forcing p")
+        ax_tf.set_title("Teacher forcing", loc="left", fontsize=10)
+        ax_tf.set_ylabel("p")
+        ax_tf.set_xlabel("epoch")
+
+        best     = self.best_epoch()
+        phase2_at = next((r["epoch"] for r in self.rows if r["phase"] == 2), None)
+        for ax in (ax_loss, ax_err, ax_lr, ax_tf):
+            if phase2_at is not None:
+                ax.axvline(phase2_at, color="crimson", ls="--", lw=1, alpha=0.6)
+            if best is not None:
+                ax.axvline(best, color="grey", ls=":", lw=1)
+            ax.grid(alpha=0.25)
+            ax.legend(fontsize=8, loc="best")
+
+        title = f"Transformer — {len(self.rows)} epochs"
+        if best is not None:
+            title += f"  |  best AR ADE = {min(self._series('val_ade_ar')[1]):.3f} km @ epoch {best}"
+        fig.suptitle(title, fontsize=11)
+        fig.tight_layout(rect=(0, 0, 1, 0.97))
+        fig.savefig(self.png_path, dpi=120)
+        plt.close(fig)
+
+
 # ── Land mask ─────────────────────────────────────────────────────────────────
 
 _LAND_RASTER: torch.Tensor | None = None
@@ -86,14 +187,12 @@ def _init_land_raster(erosion_cells: int = 2) -> None:
     land_bool = ~water_np   # True = land
     if erosion_cells > 0:
         from scipy.ndimage import binary_erosion
-        # Shrink land inward by erosion_cells (~1 km/cell at 0.01°).
-        # Coastal raster cells that straddle the shoreline are reclassified as
-        # water so predictions just offshore are not penalised.
+        # Shrink land inward so predictions just offshore aren't penalised.
         land_bool = binary_erosion(land_bool, iterations=erosion_cells)
     land_np      = land_bool.astype(np.float32)
     _LAND_RASTER = torch.from_numpy(land_np).to(cfg.device)
     print(f"  [land mask] Raster ready "
-          f"({_LAND_RASTER.shape[0]}×{_LAND_RASTER.shape[1]} cells, 0.01° res, "
+          f"({_LAND_RASTER.shape[0]}×{_LAND_RASTER.shape[1]} cells, 0.005° res, "
           f"OSM-aware, eroded {erosion_cells} cell)")
 
 
@@ -106,16 +205,12 @@ def _land_penalty(mu: torch.Tensor) -> torch.Tensor:
     grid   = torch.stack([gx, gy], dim=-1).view(B, 1, T, 2)
     raster = _LAND_RASTER.unsqueeze(0).unsqueeze(0).expand(B, -1, -1, -1)
 
-    # Nearest-neighbour gives a hard binary land/water mask with no gradient
-    # bleeding into adjacent water cells.  Detach so the mask itself carries
-    # no gradient — only its gating effect on land_p matters.
+    # Nearest-neighbour: hard land/water gate, detached (no gradient).
     on_land = F.grid_sample(
         raster, grid, mode="nearest", align_corners=True, padding_mode="border",
     ).view(B, T).detach()
 
-    # Bilinear gives smooth gradients for backprop, but only on cells where
-    # the nearest cell is actually land.  Water predictions — even right at
-    # the coastline — get zero penalty and zero gradient.
+    # Bilinear: smooth gradient, gated to land cells only so water is never penalised.
     land_p = F.grid_sample(
         raster, grid, mode="bilinear", align_corners=True, padding_mode="border",
     ).view(B, T)
@@ -142,8 +237,7 @@ def _build_scheduled_input(model, src, tgt_dec, tgt_dec_in, teacher_prob, use_am
         mu_last = mu[:, -1:, :].nan_to_num(nan=0.5).float()
 
         if cfg.predict_deltas:
-            # Convert predicted delta to absolute position for the next decoder input.
-            # dec_input is always absolute — only the loss target changes to deltas.
+            # Accumulate the predicted delta into an absolute next-input position.
             prev_lat = dec_input[:, -1:, 0].float() * _LAT_RNG + _LAT_LO  # (B, 1)
             prev_lon = dec_input[:, -1:, 1].float() * _LON_RNG + _LON_LO
             dlat     = mu_last[:, :, 0:1] * _DLAT_RNG + _DLAT_LO           # (B, 1, 1)
@@ -178,29 +272,22 @@ def _ar_rollout_with_grad(
     model, src: torch.Tensor, tgt_dec_in: torch.Tensor, use_amp: bool,
     position_noise_std: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """AR rollout with BPTT — gradients flow through the full 10-step prediction chain.
+    """AR rollout with BPTT — gradients flow through the full prediction chain.
 
-    Unlike _build_scheduled_input (no_grad + single final pass), every step is
-    differentiable.  The backward pass propagates loss from step T back through
-    steps T-1, T-2 … 1, teaching the model that an error at step k compounds
-    into larger errors at steps k+1 … T.
-
-    position_noise_std: if > 0, adds zero-mean Gaussian noise (detached) to the
-    lat/lon decoder input at each step.  This exposes the model to realistic
-    position drift during training, closing the gap between BPTT (where
-    accumulated errors are small) and true inference (where they compound freely).
-    Noise is detached — BPTT gradients still flow through delta accumulation.
+    Every step is differentiable, so the loss at step T back-propagates through the
+    earlier steps and teaches the model that early errors compound. If
+    position_noise_std > 0, detached Gaussian noise is added to the lat/lon input
+    each step to mimic the position drift seen at inference.
     """
     B, T, _ = tgt_dec_in.shape
     dec_input = src[:, -1:, :N_DEC_IN].float()   # seed: last encoder step
 
-    # Access the original (uncompiled) module so we can call _encode/_decode separately.
-    # This lets us run the encoder ONCE and cache its output for all 10 decoder steps,
-    # reducing activation memory from O(10 × encoder) to O(1 × encoder).
+    # Reach past torch.compile's wrapper so we can run the encoder once and reuse
+    # its output for every decoder step (keeps activation memory flat).
     orig = getattr(model, '_orig_mod', model)
 
     with torch.autocast(device_type=cfg.device, dtype=torch.float16, enabled=use_amp):
-        enc_output = orig._encode(src)   # single encoder pass, gradient retained
+        enc_output = orig._encode(src)
 
     all_mu: list[torch.Tensor] = []
     all_lv: list[torch.Tensor] = []
@@ -219,7 +306,6 @@ def _ar_rollout_with_grad(
         if step < T - 1:
             if cfg.predict_deltas:
                 # Accumulate predicted delta onto the current absolute position.
-                # dec_input is always absolute; next token must also be absolute.
                 prev_lat = dec_input[:, -1:, 0] * _LAT_RNG + _LAT_LO  # (B, 1)
                 prev_lon = dec_input[:, -1:, 1] * _LON_RNG + _LON_LO
                 dlat     = mu_f[:, -1:, 0] * _DLAT_RNG + _DLAT_LO      # (B, 1)
@@ -249,9 +335,7 @@ def _ar_rollout_with_grad(
                     ((cos_raw / mag + 1.0) * 0.5).unsqueeze(-1),
                 ], dim=-1)
 
-            # Inject position noise so the model trains against realistic drift.
-            # Detached noise shifts where the model looks next without blocking
-            # BPTT gradients from flowing back through the delta accumulation.
+            # Detached position noise: shifts the next input without blocking BPTT.
             if position_noise_std > 0.0:
                 noise = (torch.randn(B, 1, 2, device=next_motion.device,
                                      dtype=next_motion.dtype) * position_noise_std).detach()
@@ -265,8 +349,7 @@ def _ar_rollout_with_grad(
             next_token = torch.cat([next_motion, gt_dt], dim=-1)
             dec_input  = torch.cat([dec_input, next_token], dim=1)
 
-    # Return dec_input alongside mu/lv so the caller can use it for delta-mode
-    # haversine: pred_lat_t = dec_input_lat_t + delta_pred_t
+    # dec_input is returned too: the caller needs it to turn deltas into positions.
     return torch.cat(all_mu, dim=1), torch.cat(all_lv, dim=1), dec_input
 
 
@@ -317,9 +400,7 @@ def compute_ar_val_ade(model, loader, use_amp: bool, subsample: float = 1.0) -> 
         with torch.autocast(device_type=cfg.device, dtype=torch.float16, enabled=use_amp):
             mu_ar, _ = model(src, dec_input)
 
-        # In delta mode: pred_lat_t = dec_input_lat_t + delta_pred_t
-        # dec_input[:, t, :] holds the accumulated absolute position at step t,
-        # which is exactly the context used to predict delta_t.
+        # dec_input holds the accumulated absolute positions used to predict each delta.
         sum_ade, _, bs = _compute_ade_fde(
             mu_ar.float(), tgt_dec,
             dec_input=dec_input if cfg.predict_deltas else None,
@@ -339,16 +420,11 @@ def nll_loss(mu: torch.Tensor, log_var: torch.Tensor, target: torch.Tensor) -> t
 
 
 def _to_delta_targets(src: torch.Tensor, tgt_dec_abs: torch.Tensor) -> torch.Tensor:
-    """Replace LAT/LON targets with normalised position deltas (dLAT, dLON).
+    """Replace the LAT/LON loss targets with normalised position deltas (dLAT, dLON).
 
-    The decoder *input* always carries absolute positions so the model retains
-    geographic context.  Only the loss target changes.  SOG/COG remain absolute.
-
-    delta_0 = pos_0 - last_encoder_pos
-    delta_t = pos_t - pos_{t-1}  for t >= 1
-
-    Deltas are normalised using dLAT/dLON bounds (-2.0, 2.0) → [0, 1].
-    Zero movement normalises to 0.5 (matches the mu_proj bias initialisation).
+    delta_t = pos_t - pos_{t-1} (the first step uses the last encoder position),
+    normalised to [0, 1] so zero movement maps to 0.5. SOG/COG stay absolute, and
+    the decoder input is untouched — only the loss target changes.
     """
     tgt_lat = tgt_dec_abs[:, :, 0] * _LAT_RNG + _LAT_LO   # (B, T) degrees
     tgt_lon = tgt_dec_abs[:, :, 1] * _LON_RNG + _LON_LO
@@ -370,11 +446,8 @@ def _mu_to_abs_latlon(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Convert model output to physical (lat, lon) in degrees.
 
-    Delta mode:   pred_lat_t = dec_input_lat_t_phys + delta_pred_t_phys
-    Absolute mode: pred_lat_t = denorm(mu_lat_t)
-
-    dec_input_lat_t is the absolute position the model *saw* at step t, so
-    adding the predicted delta gives the absolute predicted position at step t.
+    In delta mode the predicted offset is added to the absolute position the model
+    saw at that step (dec_input); otherwise mu is denormalised directly.
     """
     if cfg.predict_deltas:
         prev_lat = dec_input[:, :, 0] * _LAT_RNG + _LAT_LO
@@ -504,16 +577,13 @@ def run_epoch(
             tgt_dec_loss = _to_delta_targets(src, tgt_dec_abs) if cfg.predict_deltas else tgt_dec_abs
 
             if train and use_rollout and teacher_prob < 1e-6:
-                # BPTT rollout: gradients flow through the full AR prediction chain.
-                # Returns dec_input (accumulated absolute positions) alongside mu/lv
-                # so the haversine aux loss can be computed correctly in delta mode.
+                # Pure-AR phase: BPTT rollout through the whole prediction chain.
                 mu_f, lv_f, dec_input_aux = _ar_rollout_with_grad(
                     model, src, tgt_dec_in, use_amp,
                     position_noise_std=cfg.phase2_position_noise_std,
                 )
             else:
                 if train and teacher_prob < 1.0:
-                    # _build_scheduled_input always takes absolute tgt_dec
                     tgt_input = _build_scheduled_input(
                         model, src, tgt_dec_abs, tgt_dec_in, teacher_prob, use_amp
                     )
@@ -539,9 +609,8 @@ def run_epoch(
             loss = loss / accum
 
             if train and use_land_penalty and cfg.land_penalty_weight > 0:
-                # In delta mode mu_f holds dLAT/dLON offsets, not absolute positions.
-                # Use dec_input_aux (accumulated absolute LAT/LON) so the raster is
-                # sampled at the actual predicted ship position, not delta-space.
+                # Sample the land raster at the absolute predicted position, not in
+                # delta-space (mu_f holds offsets when predict_deltas is on).
                 pen_pos = dec_input_aux[:, :, :N_DEC] if cfg.predict_deltas else mu_f
                 loss = loss + cfg.land_penalty_weight * _land_penalty(pen_pos) / accum
 
@@ -605,7 +674,7 @@ def _checkpoint_config() -> dict:
 
 # ── Phase 1: TF convergence ───────────────────────────────────────────────────
 
-def run_phase1(model, train_loader, val_loader, use_amp, amp_scaler) -> None:
+def run_phase1(model, train_loader, val_loader, use_amp, amp_scaler, history=None) -> None:
     print("\n" + "=" * 60)
     print("PHASE 1 — Teacher-Forced Convergence")
     print(f"  epochs={cfg.phase1_epochs}  lr={cfg.phase1_lr}  teacher=1.00 (fixed)")
@@ -658,6 +727,17 @@ def run_phase1(model, train_loader, val_loader, use_amp, amp_scaler) -> None:
             flush=True,
         )
 
+        if history is not None:
+            history.log(
+                epoch      = epoch,
+                phase      = 1,
+                train_loss = train_loss,
+                val_loss   = val_loss,
+                val_ade_tf = val_ade_tf,
+                val_ade_ar = val_ade_ar,     # None on epochs where AR was skipped
+                lr         = scheduler.get_last_lr()[0],
+            )
+
         if val_ade_tf < best_val_ade_tf:
             best_val_ade_tf = val_ade_tf
             torch.save(
@@ -678,7 +758,8 @@ def run_phase1(model, train_loader, val_loader, use_amp, amp_scaler) -> None:
 
 # ── Phase 2: AR fine-tuning ───────────────────────────────────────────────────
 
-def run_phase2(model, train_loader, val_loader, use_amp, amp_scaler) -> None:
+def run_phase2(model, train_loader, val_loader, use_amp, amp_scaler,
+               history=None, epoch_offset: int = 0) -> None:
     rollout_str = (
         f"  BPTT rollout from epoch {cfg.phase2_teacher_anneal_epochs + 1} "
         f"(teacher_prob=0)"
@@ -700,9 +781,7 @@ def run_phase2(model, train_loader, val_loader, use_amp, amp_scaler) -> None:
     optimizer = torch.optim.Adam(
         model.parameters(), lr=cfg.phase2_lr, betas=(0.9, 0.98), eps=1e-9
     )
-    # CosineAnnealingWarmRestarts resets to phase2_lr every T_0 epochs so the
-    # BPTT rollout (active from epoch 11 onward) gets a fresh high-LR cycle
-    # rather than training on near-zero gradient for most of Phase 2.
+    # Warm restarts give the BPTT rollout a fresh high-LR cycle every T_0 epochs.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=cfg.phase2_warmrestart_t0, T_mult=1, eta_min=1e-6,
     )
@@ -742,6 +821,18 @@ def run_phase2(model, train_loader, val_loader, use_amp, amp_scaler) -> None:
             flush=True,
         )
 
+        if history is not None:
+            history.log(
+                epoch        = epoch_offset + epoch,
+                phase        = 2,
+                train_loss   = train_loss,
+                val_loss     = val_loss,
+                val_ade_tf   = val_ade_tf,
+                val_ade_ar   = val_ade_ar,   # None on epochs where AR was skipped
+                teacher_prob = teacher_prob,
+                lr           = scheduler.get_last_lr()[0],
+            )
+
         if val_ade_ar is not None and val_ade_ar < best_val_ade_ar:
             best_val_ade_ar = val_ade_ar
             torch.save(
@@ -769,12 +860,17 @@ def main():
     os.makedirs("logs", exist_ok=True)
 
     _orig_stdout = sys.stdout
-    log_path     = os.path.join(
-        "logs", f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    )
+    stamp        = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path     = os.path.join("logs", f"train_{stamp}.log")
     _log_file  = open(log_path, "w")
     sys.stdout = _Tee(_orig_stdout, _log_file)
     print(f"Logging to {log_path}\n")
+
+    # Rewritten every epoch, so the PNG can be watched while the run is going.
+    history = TrainingCurves(
+        csv_path = os.path.join("logs", f"train_{stamp}_history.csv"),
+        png_path = os.path.join("logs", f"train_{stamp}_curves.png"),
+    )
 
     train_loader, val_loader, _ = load_data()
     model = build_model()
@@ -791,19 +887,23 @@ def main():
     print(f"Effective batch size: {cfg.batch_size * cfg.grad_accumulation}")
     print(f"Encoder features: {N_ENC}  Decoder features: {N_DEC}\n")
 
-    if cfg.skip_phase1 and os.path.exists(cfg.phase1_checkpoint_path):
+    skipped = cfg.skip_phase1 and os.path.exists(cfg.phase1_checkpoint_path)
+    if skipped:
         print(f"Phase 1 skipped — reusing checkpoint: {cfg.phase1_checkpoint_path}\n")
     else:
         if cfg.skip_phase1:
             print(f"  [warning] skip_phase1=True but {cfg.phase1_checkpoint_path} "
                   f"not found — running Phase 1 anyway\n")
-        run_phase1(model, train_loader, val_loader, use_amp, amp_scaler)
+        run_phase1(model, train_loader, val_loader, use_amp, amp_scaler, history)
 
-    run_phase2(model, train_loader, val_loader, use_amp, amp_scaler)
+    # Offset so Phase 2 continues the epoch axis instead of restarting at 1.
+    run_phase2(model, train_loader, val_loader, use_amp, amp_scaler, history,
+               epoch_offset=0 if skipped else cfg.phase1_epochs)
 
-    skipped = cfg.skip_phase1 and os.path.exists(cfg.phase1_checkpoint_path)
-    total   = (0 if skipped else cfg.phase1_epochs) + cfg.phase2_epochs
+    total = (0 if skipped else cfg.phase1_epochs) + cfg.phase2_epochs
     print(f"Training complete ({total} epochs run).  Log saved to {log_path}")
+    print(f"Curves : {history.png_path}")
+    print(f"History: {history.csv_path}")
     _log_file.close()
     sys.stdout = _orig_stdout
 

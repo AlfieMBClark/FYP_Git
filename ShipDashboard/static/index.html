@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maritime Anomaly Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,500;12..96,700;12..96,800&family=Fraunces:opsz,wght@9..144,500;9..144,900&family=JetBrains+Mono:wght@400;500;700&display=swap">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      /* "Chartroom" — deep petrol ground, warm brass instrument accent.
+         One dominant (petrol), one sharp accent (brass); signals are a
+         controlled, harmonized set — no candy pastels, no cold-teal default. */
+      --bg:        #08131a;                 /* deep petrol-charcoal — page + water */
+      --panel:     rgba(17, 30, 38, 0.95);  /* #111e26 — panel surfaces */
+      --panel-2:   #0d1a22;                  /* deeper inset (tracks, tiles) */
+      --border:    rgba(196, 214, 222, 0.11);/* neutral hairline rule */
+      --border-lt: rgba(224, 162, 74, 0.34); /* brass-tinted border on accents */
+      --accent:    #e0a24a;                 /* BRASS — the single sharp accent */
+      --accent-lt: #f3ca86;                 /* light brass — accent text/glow */
+      --green:  #59b39a;                     /* muted sea-green (best / safe) */
+      --red:    #e0554e;                     /* signal red (danger / severe) */
+      --yellow: #e0a24a;                     /* = brass (caution) */
+      --orange: #d0803f;                     /* clay (moderate) */
+      --text:   #ece6da;                     /* warm off-white */
+      --muted:  #8494a0;                     /* cool slate grey */
+      --th:     44px;
+      --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+      --font-ui:      'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+      --font-mono:    'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      font-size: 13px; overflow: hidden; font-weight: 400;
+    }
+    /* Every numeric readout is set in the mono face — the instrument signature. */
+    .pp-bar-val, .pp-tile-val, .pp-live, .ac-n, .feed-time, .feed-z,
+    .stat-val, .sel-val, .feed-total-badge, #st-tick, .type-count,
+    #sim-progress-pct, .pp-card-params { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    #map { position: absolute; inset: 0; z-index: 0; }
+    .leaflet-container { background: var(--bg) !important; }
+
+    /* ── Loading ── */
+    #loading {
+      position: absolute; inset: 0; z-index: 2000;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg); flex-direction: column; gap: 16px;
+    }
+    #loading.hidden { display: none; }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid rgba(224,162,74,0.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p { color: var(--muted); font-size: 14px; }
+
+    /* ── Topbar ── */
+    #topbar {
+      position: absolute; top: 0; left: 0; right: 0;
+      height: var(--th); z-index: 1100;
+      display: flex; align-items: center; gap: 10px; padding: 0 12px;
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(14px);
+    }
+    #sidebar-toggle {
+      background: none; border: none; color: var(--text);
+      font-size: 18px; line-height: 1; cursor: pointer;
+      padding: 5px 7px; border-radius: 6px;
+    }
+    #sidebar-toggle:hover { background: rgba(255,255,255,0.08); }
+    #topbar-brand {
+      font-family: var(--font-display); font-size: 17px; font-weight: 900;
+      color: var(--accent-lt); white-space: nowrap; letter-spacing: 0.2px;
+    }
+    #topbar-center { flex: 1; }
+    #topbar-right  { display: flex; align-items: center; gap: 6px; }
+
+    /* Phase badge is centred to the whole top bar, independent of side content */
+    #topbar-center #phase-badge {
+      position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    /* Mode toggle (Replay ⇄ Live Sim) */
+    #mode-toggle {
+      display: flex; border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; flex-shrink: 0;
+    }
+    .mode-seg {
+      border: none; border-radius: 0; background: transparent;
+      color: var(--muted); padding: 6px 14px; font-weight: 600;
+    }
+    .mode-seg { font-family: var(--font-ui); }
+    .mode-seg:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+    .mode-seg.active { background: var(--accent); color: #10161a; font-weight: 700; }
+    #mode-sim.active { background: var(--green); color: #08131a; }
+
+    /* Phase badge */
+    #phase-badge {
+      padding: 4px 12px; border-radius: 20px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+      pointer-events: none; white-space: nowrap;
+      border: 1px solid; transition: all 0.25s;
+    }
+    #phase-badge.encoder { background: rgba(224,162,74,0.18); border-color: var(--accent); color: var(--accent-lt); }
+    #phase-badge.decoder { background: rgba(239,68,68,0.15);  border-color: var(--red);    color: var(--red);    }
+    #phase-badge.sim     { background: rgba(34,197,94,0.15);  border-color: var(--green);  color: var(--green);  }
+
+    /* ── Buttons: ghost by default, brass on interaction ── */
+    button {
+      padding: 6px 13px; border: 1px solid var(--border);
+      border-radius: 5px; background: transparent;
+      color: var(--text); cursor: pointer; font-size: 12px; font-weight: 600;
+      font-family: var(--font-ui); letter-spacing: 0.2px;
+      transition: background 0.14s, border-color 0.14s, color 0.14s; white-space: nowrap;
+    }
+    button:hover    { background: rgba(224,162,74,0.10); border-color: var(--border-lt); color: var(--accent-lt); }
+    button:active   { background: rgba(224,162,74,0.18); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    button:disabled:hover { background: transparent; border-color: var(--border); color: var(--text); }
+    button.active   { background: rgba(224,162,74,0.20); border-color: var(--accent); color: var(--accent-lt); }
+    input[type=range]  { width: 100%; cursor: pointer; accent-color: var(--accent); }
+    input[type=number] {
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      border-radius: 5px; color: var(--text); padding: 4px 7px;
+      font-size: 12px; width: 100%;
+    }
+
+    /* ── Left Sidebar ── */
+    #sidebar {
+      position: absolute; top: var(--th); left: 0;
+      width: 238px; height: calc(100vh - var(--th));
+      background: var(--panel);
+      border-right: 3px solid var(--accent);
+      backdrop-filter: blur(14px); z-index: 1000;
+      overflow-y: auto; overflow-x: hidden;
+      transform: translateX(-100%);
+      transition: transform 0.22s ease;
+    }
+    #sidebar.open { transform: translateX(0); }
+    #sidebar::-webkit-scrollbar { width: 3px; }
+    #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+    .sb-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px 10px; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--panel); z-index: 2;
+    }
+    .sb-hdr-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+    .sb-hdr-close {
+      background: none; border: none; color: var(--muted);
+      font-size: 15px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    }
+    .sb-hdr-close:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+
+    .sb-sec { padding: 11px 14px; border-bottom: 1px solid var(--border); }
+    .sb-sec-title {
+      font-size: 10px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;
+    }
+
+    /* Type chips */
+    .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .type-chip {
+      display: flex; align-items: center; gap: 5px;
+      padding: 5px 6px; border-radius: 6px; cursor: pointer;
+      border: 1px solid transparent; font-size: 11px;
+      transition: background 0.12s;
+    }
+    .type-chip:hover { background: rgba(255,255,255,0.07); }
+    .type-chip.inactive { opacity: 0.25; }
+    .type-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .type-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .type-count { font-size: 10px; color: var(--muted); }
+
+    /* Movement filter */
+    .mov-row { display: flex; gap: 4px; flex-wrap: wrap; }
+    .mov-btn {
+      padding: 4px 10px; border-radius: 20px; font-size: 11px;
+      border: 1px solid var(--border); background: transparent;
+      color: var(--muted); transition: all 0.12s;
+    }
+    .mov-btn:hover { color: var(--text); background: rgba(255,255,255,0.07); }
+    .mov-btn.active { background: rgba(224,162,74,0.24); border-color: var(--accent); color: var(--text); }
+
+    /* Anomaly level badges — tinted-outline, one signal colour each */
+    .badge-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .badge {
+      padding: 5px 4px; border-radius: 5px; font-size: 11px; font-weight: 600; text-align: center;
+      cursor: pointer; transition: opacity 0.15s, background 0.15s;
+      background: color-mix(in srgb, var(--c) 13%, transparent);
+      border: 1px solid color-mix(in srgb, var(--c) 42%, transparent);
+      color: var(--c);
+    }
+    .badge:hover    { background: color-mix(in srgb, var(--c) 22%, transparent); }
+    .badge.disabled { opacity: 0.3; }
+    .badge-none     { --c: var(--green);  }
+    .badge-mild     { --c: var(--yellow); }
+    .badge-moderate { --c: var(--orange); }
+    .badge-severe   { --c: var(--red);    }
+
+    /* "Injected only" filter toggle in the Ship Type section */
+    .inj-toggle {
+      display: flex; align-items: center; gap: 6px; margin-top: 7px;
+      padding: 4px 7px; border-radius: 5px; cursor: pointer; user-select: none;
+      font-size: 11px; color: var(--muted);
+      border: 1px solid var(--border); background: var(--panel-2);
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .inj-toggle:hover  { color: var(--text); border-color: var(--border-lt); }
+    .inj-toggle.active { color: var(--text); border-color: var(--accent); background: rgba(224,162,74,0.12); }
+    .inj-toggle .inj-n { margin-left: auto; font-family: var(--font-mono); font-size: 10px; opacity: 0.75; }
+
+    /* Replay controls */
+    .ctrl-row { display: flex; gap: 6px; margin-bottom: 9px; }
+    .ctrl-row button { flex: 1; }
+    .ctrl-lbl {
+      font-size: 10px; color: var(--muted); margin-bottom: 3px;
+      display: flex; justify-content: space-between;
+    }
+    .ctrl-lbl span { color: var(--text); font-weight: 600; }
+
+    /* Stats */
+    .stat-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 12px;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-val { font-weight: 700; color: var(--accent-lt); }
+
+    /* Anomaly entries */
+    .anomaly-entry {
+      padding: 6px 8px; border-radius: 5px; margin-bottom: 4px;
+      border-left: 3px solid; cursor: pointer;
+      transition: background 0.1s; line-height: 1.4;
+    }
+    .anomaly-entry:hover { background: rgba(255,255,255,0.05); }
+    .anomaly-entry.severe   { border-color: var(--red);    }
+    .anomaly-entry.moderate { border-color: var(--orange); }
+    .ship-label  { font-weight: 600; font-size: 12px; }
+    .ship-reason { font-size: 11px; color: var(--muted); }
+
+    /* ── Right: Vessel Detail Panel ── */
+    #sel-panel {
+      position: absolute; top: var(--th); right: 0;
+      width: 265px; height: calc(100vh - var(--th));
+      background: var(--panel); border-left: 1px solid var(--border);
+      backdrop-filter: blur(14px); z-index: 1000;
+      overflow-y: auto; padding: 14px 14px 20px;
+      transform: translateX(100%);
+      transition: transform 0.22s ease;
+    }
+    #sel-panel.open { transform: translateX(0); }
+    #sel-panel::-webkit-scrollbar { width: 3px; }
+    #sel-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+    #sel-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    }
+    #sel-mmsi { font-size: 14px; font-weight: 700; }
+    #sel-type { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    #sel-close {
+      background: none; border: none; color: var(--muted);
+      font-size: 15px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    }
+    #sel-close:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+
+    .sel-row {
+      display: flex; justify-content: space-between;
+      padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12px;
+    }
+    .sel-val { font-weight: 600; color: var(--accent-lt); }
+    .sel-watch { font-size: 11px; color: var(--muted); margin-top: 8px; text-align: center; }
+    .sel-pred-title {
+      font-size: 10px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.7px; margin-top: 12px; margin-bottom: 5px;
+    }
+    /* Alerts-triggered list in the selected-vessel panel */
+    .sel-alert-title {
+      font-size: 10px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.7px; margin-top: 12px; margin-bottom: 5px;
+    }
+    .sel-alert-none { font-size: 11px; color: var(--muted); font-style: italic; padding: 2px 0; }
+    .sel-alert-row {
+      padding: 5px 0 5px 9px; margin: 3px 0; border-left: 2px solid var(--c);
+      background: color-mix(in srgb, var(--c) 8%, transparent); border-radius: 0 4px 4px 0;
+    }
+    .sel-alert-hd { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+    .sel-alert-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--c); flex-shrink: 0; }
+    .sel-alert-lbl { font-weight: 700; color: var(--text); }
+    .sel-alert-step { margin-left: auto; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    /* Analyst review buttons */
+    .sel-review { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,0.08); }
+    .sel-review-lbl { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .sel-review-btns { display: flex; gap: 5px; }
+    .rv-btn {
+      flex: 1; padding: 6px 4px; font-size: 11px; font-weight: 700; cursor: pointer;
+      border-radius: 5px; border: 1px solid var(--border); background: var(--panel-2);
+      color: var(--muted); transition: all 0.12s;
+    }
+    .rv-btn:hover { color: var(--text); border-color: var(--border-lt); }
+    .rv-anom.active { background: rgba(224,85,78,0.22); border-color: #e0554e; color: #f2a49e; }
+    .rv-norm.active { background: rgba(89,179,154,0.22); border-color: var(--green); color: #9fd8c6; }
+    .rv-clear { flex: 0 0 auto; padding: 6px 8px; }
+    .sel-alert-meta {
+      font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.4;
+      font-family: var(--font-mono);
+    }
+    .sel-pred-list { max-height: 150px; overflow-y: auto; }
+    .sel-pred-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 11px; gap: 5px;
+    }
+    .sel-step {
+      width: 17px; height: 17px; border-radius: 50%;
+      background: rgba(255,255,255,0.1); color: var(--text);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; flex-shrink: 0;
+    }
+    .sel-pred-sog { color: var(--accent-lt); font-weight: 600; white-space: nowrap; }
+    .sel-cmp-title {
+      font-size: 10px; font-weight: 700; color: var(--yellow);
+      text-transform: uppercase; letter-spacing: 0.7px; margin-top: 12px; margin-bottom: 5px;
+    }
+    .sel-cmp-row {
+      display: flex; justify-content: space-between;
+      padding: 3px 0; font-size: 11px; color: var(--muted);
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .sel-cmp-age   { color: var(--text); }
+    .sel-cmp-drift { font-weight: 600; }
+
+    /* ── Bottom Sim Bar ── */
+    #sim-bar {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+      background: var(--panel); border-top: 1px solid var(--border);
+      backdrop-filter: blur(14px); padding: 9px 16px 11px;
+    }
+    #sim-bar.hidden { display: none; }
+
+    .sim-tl-top {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 10px; color: var(--muted); margin-bottom: 3px;
+    }
+    .sim-tl-pct { color: var(--text); font-weight: 700; }
+    #sim-state-dot {
+      display: inline-block; width: 6px; height: 6px;
+      border-radius: 50%; background: var(--green); margin-right: 5px;
+    }
+    #sim-progress { accent-color: var(--accent); margin-bottom: 2px; }
+    .sim-tl-bot {
+      display: flex; justify-content: space-between;
+      font-size: 10px; margin-bottom: 7px;
+    }
+    .sim-tl-bot span:first-child,
+    .sim-tl-bot span:last-child { color: #2d3a56; }
+    #sim-time-disp { color: var(--text); font-weight: 600; }
+
+    .sim-stat-row {
+      display: flex; gap: 14px; font-size: 11px; color: var(--muted);
+      margin-bottom: 7px; flex-wrap: wrap;
+    }
+    .sim-stat-row b { color: var(--text); }
+
+    .sim-ctrl-wrap {
+      display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    }
+    .sim-ctrl-grp { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 70px; }
+    .sim-ctrl-lbl {
+      font-size: 10px; color: var(--muted);
+      display: flex; justify-content: space-between;
+    }
+    .sim-ctrl-lbl span { color: var(--text); font-weight: 600; }
+    .sim-ctrl-grp input[type=range] { accent-color: var(--green); }
+    .sim-ctrl-grp-num { min-width: 75px; max-width: 80px; display: flex; flex-direction: column; gap: 3px; }
+    .sim-btn-grp { display: flex; gap: 5px; align-items: flex-end; flex-shrink: 0; }
+    /* Solid, labelled control buttons: faded when idle, full-solid when active. */
+    .sim-btn-grp button {
+      border: none; color: #fff; font-weight: 600;
+      opacity: 0.6; transition: opacity 0.14s;
+    }
+    .sim-btn-grp button:hover  { opacity: 0.9; }
+    .sim-btn-grp button.active { opacity: 1; }
+    #sim-btn-start { background: var(--green);  color: #04140a; }
+    #sim-btn-pause { background: var(--yellow); color: #2a1d02; }
+    #sim-btn-stop  { background: var(--red);    }
+    #sim-btn-reset { background: var(--muted);  color: #071018; }
+
+    /* ── Anomaly Feed ── */
+    #sim-feed {
+      position: absolute; right: 0; top: var(--th);
+      width: 280px; height: calc(100vh - var(--th)); overflow-y: auto;
+      background: var(--panel);
+      border-left: 3px solid var(--accent);
+      backdrop-filter: blur(14px); z-index: 999; padding: 0 12px 20px;
+      transform: translateX(100%);            /* closed by default */
+      transition: transform 0.22s ease;
+    }
+    #sim-feed.open { transform: translateX(0); }
+    #sim-feed::-webkit-scrollbar { width: 3px; }
+    #sim-feed::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    /* sticky header so the title + filter stay while the list scrolls */
+    .feed-head {
+      position: sticky; top: 0; z-index: 2; background: var(--panel);
+      padding: 12px 0 8px; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+    }
+    .feed-title {
+      font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;
+    }
+    .feed-count-total { color: var(--red); }
+    .feed-entry {
+      padding: 5px 7px; border-radius: 4px; margin-bottom: 3px;
+      background: rgba(255,255,255,0.03); border-left: 3px solid var(--orange);
+      font-size: 11px; line-height: 1.5; cursor: pointer;
+      animation: fadeIn 0.25s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+    /* Vessel picked from the alert feed: yellow ring on the map + marked box */
+    @keyframes focusPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .focus-ring {
+      filter: drop-shadow(0 0 4px var(--accent-lt));
+      animation: focusPulse 1.2s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) { .focus-ring { animation: none; } }
+    .feed-entry.focused {
+      outline: 1px solid var(--accent-lt);
+      background: rgba(224,162,74,0.12);
+    }
+
+    .feed-mmsi   { font-weight: 700; }
+    /* compact "INJ" marker set beside the MMSI (synthetic-anomaly vessels) */
+    .mmsi-tag {
+      font-family: var(--font-mono); font-size: 8.5px; font-weight: 700; letter-spacing: 0.5px;
+      color: var(--accent); border: 1px solid var(--border-lt); border-radius: 3px;
+      padding: 0 3px; margin-left: 3px; vertical-align: 1px;
+    }
+    /* Total alert count for a ship's box */
+    .feed-total-badge {
+      float: right; padding: 0 7px; border-radius: 4px; font-size: 10px;
+      font-weight: 700; letter-spacing: 0.3px; font-family: var(--font-mono);
+      background: color-mix(in srgb, var(--c, var(--accent)) 16%, transparent);
+      border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 45%, transparent);
+      color: var(--c, var(--accent));
+    }
+    /* Alert-type filter chips — tinted outline in each type's signal colour */
+    .anom-filter { display: flex; flex-direction: column; gap: 4px; }
+    .anom-chip {
+      cursor: pointer; font-size: 10.5px; font-weight: 600; line-height: 20px; padding: 0 9px;
+      border-radius: 5px; border: 1px solid var(--border);
+      background: var(--panel-2); color: var(--muted);
+      transition: color 0.12s, border-color 0.12s, background 0.12s; user-select: none;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .anom-chip .chip-dot {
+      width: 7px; height: 7px; border-radius: 2px; background: var(--c); flex-shrink: 0;
+      box-shadow: 0 0 5px color-mix(in srgb, var(--c) 55%, transparent);
+    }
+    .anom-chip .ac-n  { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.7; }
+    .anom-chip:hover  { color: var(--text); border-color: var(--border-lt); }
+    .anom-chip:not(.active)          { opacity: 0.62; }
+    .anom-chip:not(.active) .chip-dot { opacity: 0.4; box-shadow: none; }
+    .anom-chip.active { color: var(--text); border-color: var(--accent); background: rgba(224,162,74,0.12); }
+    .feed-chips  { display: flex; flex-wrap: wrap; gap: 3px; margin: 4px 0 3px; }
+    .feed-chip {
+      display: inline-block; padding: 0 7px; border-radius: 4px;
+      font-size: 9px; font-weight: 700; line-height: 16px; white-space: nowrap;
+      letter-spacing: 0.3px;
+      background: color-mix(in srgb, var(--c) 15%, transparent);
+      border: 1px solid color-mix(in srgb, var(--c) 42%, transparent);
+      color: var(--c);
+    }
+    /* Chips whose firing location is known are clickable — jump to the instance */
+    .feed-chip.clickable { cursor: pointer; box-shadow: 0 0 0 1px rgba(255,255,255,0.25) inset; }
+    .feed-chip.clickable:hover { filter: brightness(1.15); box-shadow: 0 0 0 1.5px #fff inset; }
+    .feed-chip.clickable::after { content: " \25B8"; opacity: 0.7; }
+    /* Pulsing marker dropped at the spot an alert fired */
+    .alert-instance { background: none; border: none; }
+    .ai-pulse {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--c); border: 2px solid #fff;
+      box-shadow: 0 0 0 0 var(--c);
+      animation: aiPulse 1.4s ease-out infinite;
+    }
+    @keyframes aiPulse {
+      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 70%, transparent); }
+      70%  { box-shadow: 0 0 0 14px transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+    .feed-z      { font-weight: 600; }
+    .feed-time   { color: var(--muted); }
+    .feed-reason { font-size: 10px; color: var(--muted); }
+
+    /* Leaflet override */
+    .vessel-icon { background: none !important; border: none !important; }
+
+    /* Newly arrived / revealed prediction polyline: bright glow that fades */
+    @keyframes predFlash {
+      0%   { filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 10px currentColor); }
+      100% { filter: none; }
+    }
+    path.pred-flash { animation: predFlash 1.1s ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      path.pred-flash { animation: none; }
+    }
+
+    /* Vessel with an inference in flight: pulsing blue glow on the icon */
+    @keyframes inferPulse {
+      0%, 100% { filter: drop-shadow(0 0 1px var(--accent-lt)); }
+      50%      { filter: drop-shadow(0 0 6px var(--accent-lt)); }
+    }
+    .vessel-icon.infer-pending svg { animation: inferPulse 0.9s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .vessel-icon.infer-pending svg { animation: none; filter: drop-shadow(0 0 4px var(--accent-lt)); }
+    }
+
+    /* Replay timeline: markers at each prediction issue step */
+    #tick-wrap { position: relative; }
+    #tick-marks {
+      position: relative; height: 6px; margin: 0 7px 1px;   /* align with range track */
+    }
+    .tick-mark {
+      position: absolute; top: 0; width: 2px; height: 6px;
+      background: var(--accent-lt); border-radius: 1px; opacity: 0.8;
+      transform: translateX(-1px);
+    }
+
+    /* "Prediction #k issued" pulse label under the replay controls */
+    #replay-pred-label {
+      margin-top: 7px; font-size: 10px; font-weight: 700; color: var(--accent-lt);
+      opacity: 0; transition: opacity 0.3s; text-align: center;
+      letter-spacing: 0.4px; min-height: 13px;
+    }
+    #replay-pred-label.show { opacity: 1; }
+
+    /* Sim timeline while a seek is in flight */
+    #sim-bar.seeking #sim-progress { opacity: 0.5; }
+    #sim-bar.seeking .sim-tl-pct   { color: var(--accent-lt); animation: seekBlink 0.9s linear infinite; }
+    @keyframes seekBlink { 50% { opacity: 0.45; } }
+
+    /* ── Model Performance Panel ── */
+    #perf-panel {
+      position: absolute; top: var(--th); left: 50%; transform: translateX(-50%);
+      width: 560px; max-width: calc(100vw - 20px);
+      background: var(--panel); border: 1px solid var(--border); border-top: none;
+      backdrop-filter: blur(16px); z-index: 1060;
+      padding: 13px 15px 15px;
+      box-shadow: 0 10px 36px rgba(0,0,0,0.55);
+      display: none;
+      max-height: calc(100vh - var(--th) - 16px); overflow-y: auto;
+      border-radius: 0 0 10px 10px;
+    }
+    #perf-panel::-webkit-scrollbar { width: 4px; }
+    #perf-panel::-webkit-scrollbar-thumb { background: rgba(224,162,74,0.3); border-radius: 2px; }
+    #perf-panel.open { display: block; }
+    .pp-hdr {
+      display: flex; justify-content: space-between; align-items: center;
+      padding-bottom: 9px; margin-bottom: 11px; border-bottom: 1px solid var(--border);
+    }
+    .pp-hdr-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+    .pp-close { background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; padding: 1px 6px; border-radius: 4px; }
+    .pp-close:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+    .pp-cards { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; gap: 7px; margin-bottom: 12px; }
+    /* GRU + TCN stack in the left column; the active Transformer is featured as
+       a tall card spanning both rows on the right. */
+    .pp-card[data-model="gru"]         { grid-column: 1; grid-row: 1; }
+    .pp-card[data-model="tcn"]         { grid-column: 1; grid-row: 2; }
+    .pp-card[data-model="transformer"] {
+      grid-column: 2; grid-row: 1 / 3;
+      display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    }
+    /* Model cards double as selector buttons — clicking one hot-swaps the model */
+    .pp-card {
+      border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px;
+      cursor: pointer; user-select: none;
+      transition: border-color 0.12s, background 0.12s, opacity 0.12s;
+    }
+    .pp-card:hover { border-color: var(--accent-lt); background: rgba(255,255,255,0.04); }
+    .pp-card:focus-visible { outline: 2px solid var(--accent-lt); outline-offset: 1px; }
+    .pp-card.pp-active { border-color: rgba(224,162,74,0.5); background: rgba(224,162,74,0.09); }
+    /* while a swap is in flight */
+    .pp-cards.pp-loading .pp-card { opacity: 0.45; pointer-events: none; cursor: default; }
+    .pp-card.pp-failed { border-color: var(--red); }
+    .pp-card-name { font-size: 12px; font-weight: 700; margin-bottom: 2px; display: flex; align-items: center; gap: 5px; }
+    .pp-badge { font-size: 9px; background: var(--accent); color: #fff; border-radius: 10px; padding: 1px 5px; font-weight: 800; letter-spacing: 0.3px; }
+    .pp-card-arch { font-size: 10px; color: var(--muted); line-height: 1.5; margin-bottom: 4px; }
+    .pp-card-params { font-size: 11px; color: var(--text); }
+    .pp-card-params span { color: var(--muted); }
+
+    .pp-sec { margin-bottom: 11px; }
+    .pp-sec-lbl {
+      font-size: 9px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 6px;
+    }
+    /* live sample-count next to the ADE label, e.g. "live · n=1,204" */
+    .pp-live { font-weight: 600; letter-spacing: 0.3px; color: var(--accent-lt); text-transform: none; }
+
+    .pp-bar { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+    .pp-bar-lbl { font-size: 10px; color: var(--muted); width: 68px; text-align: right; flex-shrink: 0; white-space: nowrap; }
+    .pp-bar-track { flex: 1; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+    .pp-bar-fill { height: 100%; border-radius: 3px; }
+    .pp-bar-fill.old  { background: rgba(100,116,139,0.4); }
+    .pp-bar-fill.gru  { background: #64748b; }
+    .pp-bar-fill.tcn  { background: #94a3b8; }
+    .pp-bar-fill.tfm  { background: var(--accent); }
+    .pp-bar-fill.tfml { background: var(--accent-lt); }
+    .pp-badge.alt { background: var(--accent-lt); color: #04140a; }
+    .pp-bar-val { font-size: 11px; font-weight: 600; width: 104px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .pp-bar-val.best { color: var(--green); }
+    .pp-bar-val.dim  { color: var(--muted); }
+    /* "+10% vs best" delta appended to non-winning models — the honest emphasis */
+    .pp-delta { color: var(--muted); font-weight: 600; font-size: 10px; margin-left: 5px; }
+
+    .pp-divider { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+
+    .pp-grid4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+    .pp-tile { background: rgba(255,255,255,0.04); border-radius: 5px; padding: 6px 8px; }
+    .pp-tile-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 1px; }
+    .pp-tile-val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .pp-live-val  { font-size: 16px; font-weight: 700; color: var(--accent-lt); font-variant-numeric: tabular-nums; }
+    .pp-tile.center { text-align: center; }
+    .pp-det-real {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 6px; padding: 5px 9px; border-radius: 5px;
+      border: 1px solid color-mix(in srgb, #b08968 40%, transparent);
+      background: color-mix(in srgb, #b08968 10%, transparent);
+    }
+    .pp-det-real .pp-tile-val { color: #c0a080; font-family: var(--font-mono); }
+    .pp-live-lbl  { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; margin-top: 1px; }
+
+    /* Two metric sets + review */
+    .pp-ms-lbl {
+      display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px;
+      font-size: 10px; font-weight: 700; color: var(--text);
+      text-transform: uppercase; letter-spacing: 0.4px;
+    }
+    .pp-ms-note { font-size: 9px; font-weight: 500; color: var(--muted); text-transform: none; letter-spacing: 0.2px; }
+    .pp-review-note { font-size: 9px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+    #pp-review-progress { color: var(--accent-lt); font-variant-numeric: tabular-nums; }
+
+    /* Per-ship-type detection breakdown */
+    .pp-bt-title { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 9px 0 3px; }
+    .pp-bt { display: flex; flex-direction: column; gap: 1px; }
+    .pp-bt-row {
+      display: grid; grid-template-columns: 1fr 40px 40px 40px 34px; gap: 4px;
+      font-size: 11px; padding: 3px 6px; border-radius: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+    .pp-bt-row:nth-child(even) { background: rgba(255,255,255,0.03); }
+    .pp-bt-row span:not(:first-child) { text-align: right; }
+    .pp-bt-hd { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .pp-bt-hd:nth-child(even) { background: none; }
+
+    /* Anomaly right panel */
+    #anomaly-panel {
+      position: absolute; top: var(--th); right: 0;
+      width: 242px; height: calc(100vh - var(--th));
+      background: var(--panel); border-left: 3px solid var(--accent);
+      backdrop-filter: blur(14px); z-index: 890;
+      overflow-y: auto; padding: 14px 13px 20px;
+      transform: translateX(100%);            /* toggled by the Alerts button */
+      transition: transform 0.22s ease;
+    }
+    #anomaly-panel.open { transform: translateX(0); }
+    #anomaly-panel::-webkit-scrollbar { width: 3px; }
+    #anomaly-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .ap-header {
+      margin-bottom: 11px; padding-bottom: 9px; border-bottom: 1px solid var(--border);
+    }
+    .ap-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p id="loading-msg">Loading ship data…</p>
+</div>
+
+<div id="map"></div>
+
+<!-- ── Topbar ── -->
+<div id="topbar">
+  <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle filters">☰</button>
+  <div id="topbar-brand">FYP Dashboard</div>
+  <div id="mode-toggle" title="Switch between precomputed replay and live database simulation">
+    <button id="mode-replay" class="mode-seg active" onclick="setMode('replay')">Replay</button>
+    <button id="mode-sim" class="mode-seg" onclick="setMode('sim')">Live Sim</button>
+  </div>
+  <div id="topbar-center">
+    <div id="phase-badge" class="encoder">⬤ HISTORY</div>
+  </div>
+  <div id="topbar-right">
+    <button id="btn-alerts" class="active" onclick="toggleAnomPanel()" title="Show/hide the anomaly feed">Alerts</button>
+    <button id="btn-land" onclick="togglePenaltyMap()" title="Overlay the model's training land-penalty map">Land</button>
+    <button id="btn-perf" onclick="togglePerfPanel()" title="Model performance">Model</button>
+  </div>
+</div>
+
+<!-- ── Left Sidebar ── -->
+<div id="sidebar">
+  <div class="sb-hdr">
+    <span class="sb-hdr-title">Filters</span>
+    <button class="sb-hdr-close" onclick="toggleSidebar()">✕</button>
+  </div>
+
+  <!-- Ship Type -->
+  <div class="sb-sec">
+    <div class="sb-sec-title">Ship Type</div>
+    <div id="type-legend" class="type-grid"></div>
+    <div id="injected-filter" class="inj-toggle" onclick="toggleInjectedOnly()"
+         title="Show only injected synthetic-anomaly vessels">
+      <span class="mmsi-tag">INJ</span>
+      <span>Injected only</span>
+      <span class="inj-n" id="inj-count"></span>
+    </div>
+  </div>
+
+  <!-- Anomaly Level (static mode) -->
+  <div class="sb-sec" id="anom-level-section">
+    <div class="sb-sec-title">Anomaly Level</div>
+    <div id="anomaly-filters" class="badge-row">
+      <span class="badge badge-none"     onclick="toggleLevel('none')">Normal</span>
+      <span class="badge badge-mild"     onclick="toggleLevel('mild')">Mild</span>
+      <span class="badge badge-moderate" onclick="toggleLevel('moderate')">Moderate</span>
+      <span class="badge badge-severe"   onclick="toggleLevel('severe')">Severe</span>
+    </div>
+  </div>
+
+  <!-- Movement Status (sim mode) -->
+  <div class="sb-sec" id="mov-filter-section" style="display:none">
+    <div class="sb-sec-title">Movement Status</div>
+    <div class="mov-row">
+      <button class="mov-btn active" id="mf-all"     onclick="toggleMovFilter('all')">All</button>
+      <button class="mov-btn"        id="mf-underway" onclick="toggleMovFilter('underway')">Underway (&gt;1 kn)</button>
+      <button class="mov-btn"        id="mf-anchor"   onclick="toggleMovFilter('anchor')">At Anchor</button>
+    </div>
+  </div>
+
+  <!-- Replay Controls (static mode) -->
+  <div class="sb-sec" id="replay-controls">
+    <div class="sb-sec-title">Replay</div>
+    <div class="ctrl-row">
+      <button id="btn-play" class="active" onclick="togglePlay()">⏸ Pause</button>
+      <button onclick="restartReplay()" style="flex:0;padding:6px 10px" title="Restart from step 0">↺ Restart</button>
+    </div>
+    <div class="ctrl-lbl">Speed <span id="speed-label">2×</span></div>
+    <input type="range" id="speed-slider" min="1" max="8" value="2"
+           oninput="setSpeed(this.value)" style="margin-bottom:10px">
+    <div class="ctrl-lbl">History ◂ ▸ Predictions <span id="st-tick">0 / 139</span></div>
+    <div id="tick-wrap">
+      <div id="tick-marks" title="Prediction issue points"></div>
+      <input type="range" id="tick-bar" min="0" max="139" value="0"
+             oninput="seekTo(+this.value)">
+    </div>
+    <div id="replay-pred-label"></div>
+  </div>
+
+  <!-- Stats -->
+  <div class="sb-sec" id="stats">
+    <div class="sb-sec-title" id="stats-title">Fleet Summary</div>
+    <div class="stat-row"><span id="st-l-total">Total ships</span><span class="stat-val" id="st-total">—</span></div>
+    <div class="stat-row"><span id="st-l-anom">Anomalous</span> <span class="stat-val" id="st-anom">—</span></div>
+    <div class="stat-row"><span id="st-l-ade">Mean ADE</span>  <span class="stat-val" id="st-ade">—</span></div>
+    <div class="stat-row" id="st-tick-row" style="display:none">
+      <span>Sim time</span><span class="stat-val" id="st-tick-stat">—</span>
+    </div>
+  </div>
+
+  <!-- anomaly-list: kept as hidden placeholder for JS compatibility -->
+  <div id="anomaly-list" style="display:none"></div>
+</div>
+
+<!-- ── Right: Selected Vessel Panel ── -->
+<div id="sel-panel">
+  <div id="sel-header">
+    <div id="sel-mmsi-wrap">
+      <div id="sel-mmsi">—</div>
+      <div id="sel-type">—</div>
+    </div>
+    <button id="sel-close" onclick="deselectAny()">✕</button>
+  </div>
+  <div id="sel-body"></div>
+</div>
+
+<!-- ── Bottom Sim Bar ── -->
+<div id="sim-bar" class="hidden">
+  <div class="sim-tl-top">
+    <span><span id="sim-state-dot"></span>Timeline — drag to seek anywhere</span>
+    <span class="sim-tl-pct" id="sim-progress-pct">—</span>
+  </div>
+  <input type="range" id="sim-progress" min="0" max="1000" step="1" value="0"
+         oninput="onSimProgressInput(this.value)"
+         onchange="onSimProgressCommit(this.value)">
+  <div class="sim-tl-bot">
+    <span id="sim-data-start">—</span>
+    <span id="sim-time-disp">—</span>
+    <span id="sim-data-end">—</span>
+  </div>
+  <div class="sim-stat-row">
+    <span>Pings: <b id="sim-pings-disp">0</b></span>
+    <span>Vessels: <b id="sim-vessels-disp">0</b></span>
+    <span>Anomalies: <b id="sim-anom-disp">0</b></span>
+    <span>Predictions: <b id="sim-pred-disp">0</b></span>
+    <span>Last pred: <b id="sim-lastpred-disp">—</b></span>
+    <span>Pred rate: <b id="sim-predrate-disp">—</b></span>
+  </div>
+  <div class="sim-ctrl-wrap">
+    <div class="sim-ctrl-grp">
+      <div class="sim-ctrl-lbl">Speed <span id="sim-speed-label">900×</span></div>
+      <input type="range" id="sim-speed-slider" min="0" max="6" step="1" value="2"
+             oninput="onSimSpeedChange(this.value)">
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#2d3a56;margin-top:1px">
+        <span>60×</span><span>300×</span><span>900×</span><span>1728×</span><span>3600×</span><span>7200×</span><span>14400×</span>
+      </div>
+    </div>
+    <div class="sim-ctrl-grp">
+      <div class="sim-ctrl-lbl">Threshold <span id="sim-thresh-label">3.0 σ</span></div>
+      <input type="range" id="sim-thresh-slider" min="1" max="5" step="0.5" value="3"
+             oninput="onSimThreshChange(this.value)" style="accent-color:var(--red)">
+    </div>
+    <div class="sim-ctrl-grp">
+      <div class="sim-ctrl-lbl">Predict every <span id="sim-predevery-label">5 pings</span></div>
+      <input type="range" id="sim-predevery-slider" min="1" max="30" step="1" value="5"
+             oninput="onSimPredictEveryChange(this.value)" style="accent-color:var(--yellow)">
+    </div>
+    <div class="sim-ctrl-grp-num">
+      <div class="sim-ctrl-lbl">Max vessels</div>
+      <input type="number" id="sim-max-vessels" min="10" max="200" value="50"
+             onchange="onSimMaxVesselsChange(this.value)">
+    </div>
+    <div class="sim-btn-grp">
+      <button id="sim-btn-start" onclick="simStart()">Start</button>
+      <button id="sim-btn-pause" onclick="simTogglePause()">Pause</button>
+      <button id="sim-btn-stop"  onclick="simStop()">Stop</button>
+      <button id="sim-btn-reset" onclick="simReset()">Reset</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Anomaly Feed (top-right, sim mode) ── -->
+<div id="sim-feed">
+  <div class="feed-head">
+    <div class="feed-title">Anomaly Feed <span id="feed-total" class="feed-count-total"></span></div>
+    <div id="anom-filter" class="anom-filter" title="Filter alerts by type"></div>
+  </div>
+  <div id="sim-feed-entries"></div>
+</div>
+
+<!-- ── Right Anomaly Panel (static mode) ── -->
+<div id="anomaly-panel">
+  <div class="ap-header">
+    <span class="ap-title">Anomaly Feed</span>
+    <div id="ap-thresh-note" style="font-size:10px;color:var(--muted);margin:3px 0 6px"></div>
+    <div id="replay-anom-filter" class="anom-filter" title="Filter anomalies by type"></div>
+  </div>
+  <div id="anomaly-entries"></div>
+</div>
+
+<!-- ── Model Performance Panel ── -->
+<div id="perf-panel">
+  <div class="pp-hdr">
+    <span class="pp-hdr-title">Model Performance</span>
+    <button class="pp-close" onclick="togglePerfPanel()">✕</button>
+  </div>
+
+  <!-- Architecture cards -->
+  <div class="pp-cards">
+    <div class="pp-card" data-model="gru" role="button" tabindex="0"
+         title="Run inference with the GRU baseline" onclick="selectModel('gru')">
+      <div class="pp-card-name">GRU <span class="pp-badge act-badge" hidden>Active</span></div>
+      <div class="pp-card-arch">2 layers · h=256</div>
+      <div class="pp-card-params"><span>Params:</span> 2.46M</div>
+    </div>
+    <div class="pp-card" data-model="tcn" role="button" tabindex="0"
+         title="Run inference with the TCN" onclick="selectModel('tcn')">
+      <div class="pp-card-name">TCN <span class="pp-badge act-badge" hidden>Active</span></div>
+      <div class="pp-card-arch">5 levels · 256 ch</div>
+      <div class="pp-card-params"><span>Params:</span> 2.65M</div>
+    </div>
+    <div class="pp-card pp-active" data-model="transformer" role="button" tabindex="0"
+         title="Run inference with the Transformer" onclick="selectModel('transformer')">
+      <div class="pp-card-name">Transformer <span class="pp-badge act-badge">Active</span></div>
+      <div class="pp-card-arch">5 layers · d=128</div>
+      <div class="pp-card-params"><span>Params:</span> 2.3M</div>
+    </div>
+  </div>
+
+  <!-- AR ADE bars (scale: 0–2 km) — live, measured against ground truth as replay plays -->
+  <div class="pp-sec">
+    <div class="pp-sec-lbl">Autoregressive ADE <span class="pp-live" id="pp-score-n"></span></div>
+    <div class="pp-bar">
+      <span class="pp-bar-lbl">GRU</span>
+      <div class="pp-bar-track"><div class="pp-bar-fill gru" id="pp-ade-fill-gru" style="width:0%"></div></div>
+      <span class="pp-bar-val" id="pp-ade-val-gru">—</span>
+    </div>
+    <div class="pp-bar">
+      <span class="pp-bar-lbl">TCN</span>
+      <div class="pp-bar-track"><div class="pp-bar-fill tcn" id="pp-ade-fill-tcn" style="width:0%"></div></div>
+      <span class="pp-bar-val" id="pp-ade-val-tcn">—</span>
+    </div>
+    <div class="pp-bar">
+      <span class="pp-bar-lbl">Transformer</span>
+      <div class="pp-bar-track"><div class="pp-bar-fill tfm" id="pp-ade-fill-transformer" style="width:0%"></div></div>
+      <span class="pp-bar-val" id="pp-ade-val-transformer">—</span>
+    </div>
+  </div>
+
+  <!-- FDE bars (scale: 0–3 km) -->
+  <div class="pp-sec">
+    <div class="pp-sec-lbl">Final Displacement Error</div>
+    <div class="pp-bar">
+      <span class="pp-bar-lbl">GRU</span>
+      <div class="pp-bar-track"><div class="pp-bar-fill gru" id="pp-fde-fill-gru" style="width:0%"></div></div>
+      <span class="pp-bar-val" id="pp-fde-val-gru">—</span>
+    </div>
+    <div class="pp-bar">
+      <span class="pp-bar-lbl">TCN</span>
+      <div class="pp-bar-track"><div class="pp-bar-fill tcn" id="pp-fde-fill-tcn" style="width:0%"></div></div>
+      <span class="pp-bar-val" id="pp-fde-val-tcn">—</span>
+    </div>
+    <div class="pp-bar">
+      <span class="pp-bar-lbl">Transformer</span>
+      <div class="pp-bar-track"><div class="pp-bar-fill tfm" id="pp-fde-fill-transformer" style="width:0%"></div></div>
+      <span class="pp-bar-val" id="pp-fde-val-transformer">—</span>
+    </div>
+  </div>
+
+  <!-- Anomaly detection: per-class (optimal σ) + combined (injected + real) -->
+  <div class="pp-sec" id="pp-detect" style="display:none">
+    <div class="pp-sec-lbl">Anomaly Detection <span class="pp-live" id="pp-det-model">transformer</span></div>
+
+    <div class="pp-ms-lbl">By ship class</div>
+    <div id="pp-det-bytype" class="pp-bt"></div>
+
+    <div class="pp-ms-lbl" style="margin-top:10px">Combined <span class="pp-ms-note" id="pp-cf-n">—</span></div>
+    <div class="pp-grid4">
+      <div class="pp-tile"><div class="pp-tile-lbl">Precision</div><div class="pp-tile-val" id="pp-cf-precision">—</div></div>
+      <div class="pp-tile"><div class="pp-tile-lbl">Recall</div><div class="pp-tile-val" id="pp-cf-recall">—</div></div>
+      <div class="pp-tile"><div class="pp-tile-lbl">F1</div><div class="pp-tile-val" id="pp-cf-f1">—</div></div>
+      <div class="pp-tile"><div class="pp-tile-lbl">False alarm</div><div class="pp-tile-val" id="pp-cf-far">—</div></div>
+    </div>
+
+    <div id="pp-det-real" class="pp-det-real" style="display:none">
+      <span class="pp-tile-lbl">Real faults (FLAGS)</span>
+      <span class="pp-tile-val" id="pp-det-real-val" style="font-size:12px">—</span>
+    </div>
+  </div>
+
+  <!-- Training data (from config.py) -->
+  <div class="pp-sec">
+    <div class="pp-sec-lbl">Training Data</div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.6">
+      Danish / North Sea · 90-ping history → 10-step forecast
+    </div>
+  </div>
+
+  <hr class="pp-divider">
+
+  <!-- Inference config (hardcoded from sim_engine.py) -->
+  <div class="pp-sec">
+    <div class="pp-sec-lbl">Inference Setup</div>
+    <div class="pp-grid4">
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Batch size</div>
+        <div class="pp-tile-val">8 vessels</div>
+      </div>
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Collect window</div>
+        <div class="pp-tile-val">30 ms</div>
+      </div>
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Infer thread</div>
+        <div class="pp-tile-val">Background</div>
+      </div>
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Checkpoint</div>
+        <div class="pp-tile-val" style="font-size:11px">best_model</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live sim config (from /api/sim/status) -->
+  <div class="pp-sec">
+    <div class="pp-sec-lbl">Live Sim Configuration</div>
+    <div class="pp-grid4">
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Threshold</div>
+        <div class="pp-tile-val" id="pp-thresh">3.0 σ</div>
+      </div>
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Predict every</div>
+        <div class="pp-tile-val" id="pp-every">5 pings</div>
+      </div>
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Max vessels</div>
+        <div class="pp-tile-val" id="pp-maxv">50</div>
+      </div>
+      <div class="pp-tile">
+        <div class="pp-tile-lbl">Sim speed</div>
+        <div class="pp-tile-val" id="pp-speed">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live counters -->
+  <div class="pp-sec" style="margin-bottom:0">
+    <div class="pp-sec-lbl">Live Session Counters</div>
+    <div class="pp-grid4">
+      <div class="pp-tile center">
+        <div class="pp-live-val" id="pp-pings">—</div>
+        <div class="pp-live-lbl">Pings</div>
+      </div>
+      <div class="pp-tile center">
+        <div class="pp-live-val" id="pp-preds">—</div>
+        <div class="pp-live-lbl">Predictions</div>
+      </div>
+      <div class="pp-tile center">
+        <div class="pp-live-val" id="pp-dets" style="color:var(--red)">—</div>
+        <div class="pp-live-lbl">Detections</div>
+      </div>
+      <div class="pp-tile center">
+        <div class="pp-live-val" id="pp-rate">—</div>
+        <div class="pp-live-lbl">Det. Rate</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:13px;padding-top:10px;border-top:1px solid var(--border);
+              text-align:center;font-size:10px;color:var(--muted)">
+    Developed by Alfiansyah Max Bannatyne Clark &nbsp;·&nbsp; TP075566
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+
+=== TCN — 2026-07-17 19:25:12 ===
+Model: 2,648,586 trainable parameters
+Device: cuda  AMP: enabled
+Effective batch size: 1024
+Encoder sequence length: 90  Land penalty weight: 0.2
+
+Epoch   1/50  train_loss= -11.452  val_loss= -12.766  val_ade= 75.07  val_fde=140.05  lr=1.32e-04
+  ✓ Saved best checkpoint (val_ade=75.07 km)
+Epoch   2/50  train_loss= -12.854  val_loss= -12.870  val_ade= 14.62  val_fde= 26.92  lr=3.72e-04
+  ✓ Saved best checkpoint (val_ade=14.62 km)
+Epoch   3/50  train_loss= -12.941  val_loss= -12.823  val_ade= 30.89  val_fde= 57.94  lr=6.69e-04
+Epoch   4/50  train_loss= -12.964  val_loss= -12.787  val_ade= 15.74  val_fde= 28.89  lr=9.08e-04
+Epoch   5/50  train_loss= -12.980  val_loss= -12.835  val_ade= 18.85  val_fde= 35.06  lr=1.00e-03
+Epoch   6/50  train_loss= -12.989  val_loss= -12.865  val_ade= 16.55  val_fde= 30.64  lr=9.99e-04
+Epoch   7/50  train_loss= -12.994  val_loss= -12.878  val_ade= 16.32  val_fde= 30.08  lr=9.95e-04
+Epoch   8/50  train_loss= -12.997  val_loss= -12.889  val_ade=  6.23  val_fde= 11.26  lr=9.89e-04
+  ✓ Saved best checkpoint (val_ade=6.23 km)
+Epoch   9/50  train_loss= -13.000  val_loss= -12.888  val_ade= 10.80  val_fde= 20.08  lr=9.81e-04
+Epoch  10/50  train_loss= -13.001  val_loss= -12.886  val_ade=  9.73  val_fde= 17.81  lr=9.70e-04
+Epoch  11/50  train_loss= -13.003  val_loss= -12.886  val_ade= 13.20  val_fde= 24.67  lr=9.57e-04
+Epoch  12/50  train_loss= -13.003  val_loss= -12.883  val_ade=  8.08  val_fde= 15.16  lr=9.41e-04
+Epoch  13/50  train_loss= -13.004  val_loss= -12.894  val_ade=  5.20  val_fde=  9.83  lr=9.24e-04
+  ✓ Saved best checkpoint (val_ade=5.20 km)
+Epoch  14/50  train_loss= -13.005  val_loss= -12.894  val_ade=  3.02  val_fde=  5.90  lr=9.04e-04
+  ✓ Saved best checkpoint (val_ade=3.02 km)
+Epoch  15/50  train_loss= -13.006  val_loss= -12.887  val_ade=  3.58  val_fde=  6.90  lr=8.83e-04
+Epoch  16/50  train_loss= -13.006  val_loss= -12.888  val_ade=  2.30  val_fde=  4.47  lr=8.60e-04
+  ✓ Saved best checkpoint (val_ade=2.30 km)
+Epoch  17/50  train_loss= -13.007  val_loss= -12.895  val_ade=  6.14  val_fde= 11.63  lr=8.35e-04
+Epoch  18/50  train_loss= -13.007  val_loss= -12.889  val_ade=  4.99  val_fde=  9.47  lr=8.08e-04
+Epoch  19/50  train_loss= -13.008  val_loss= -12.890  val_ade=  2.77  val_fde=  5.35  lr=7.80e-04
+Epoch  20/50  train_loss= -13.008  val_loss= -12.884  val_ade=  2.10  val_fde=  4.29  lr=7.50e-04
+  ✓ Saved best checkpoint (val_ade=2.10 km)
+Epoch  21/50  train_loss= -13.009  val_loss= -12.896  val_ade=  2.03  val_fde=  4.04  lr=7.19e-04
+  ✓ Saved best checkpoint (val_ade=2.03 km)
+Epoch  22/50  train_loss= -13.009  val_loss= -12.897  val_ade=  6.45  val_fde= 12.17  lr=6.87e-04
+Epoch  23/50  train_loss= -13.009  val_loss= -12.898  val_ade=  2.67  val_fde=  4.93  lr=6.54e-04
+Epoch  24/50  train_loss= -13.010  val_loss= -12.900  val_ade=  1.93  val_fde=  3.75  lr=6.21e-04
+  ✓ Saved best checkpoint (val_ade=1.93 km)
+Epoch  25/50  train_loss= -13.010  val_loss= -12.897  val_ade=  2.43  val_fde=  4.63  lr=5.87e-04
+Epoch  26/50  train_loss= -13.011  val_loss= -12.902  val_ade=  2.88  val_fde=  5.36  lr=5.52e-04
+Epoch  27/50  train_loss= -13.011  val_loss= -12.901  val_ade=  1.71  val_fde=  3.33  lr=5.17e-04
+  ✓ Saved best checkpoint (val_ade=1.71 km)
+Epoch  28/50  train_loss= -13.011  val_loss= -12.902  val_ade=  2.83  val_fde=  5.37  lr=4.83e-04
+Epoch  29/50  train_loss= -13.011  val_loss= -12.906  val_ade=  2.17  val_fde=  4.28  lr=4.48e-04
+Epoch  30/50  train_loss= -13.012  val_loss= -12.909  val_ade=  1.87  val_fde=  3.73  lr=4.13e-04
+Epoch  31/50  train_loss= -13.012  val_loss= -12.898  val_ade=  1.85  val_fde=  3.53  lr=3.79e-04
+Epoch  32/50  train_loss= -13.012  val_loss= -12.895  val_ade=  1.85  val_fde=  3.68  lr=3.45e-04
+Epoch  33/50  train_loss= -13.012  val_loss= -12.903  val_ade=  2.66  val_fde=  5.03  lr=3.13e-04
+Epoch  34/50  train_loss= -13.013  val_loss= -12.903  val_ade=  1.75  val_fde=  3.42  lr=2.81e-04
+Epoch  35/50  train_loss= -13.013  val_loss= -12.898  val_ade=  2.12  val_fde=  4.15  lr=2.50e-04
+Epoch  36/50  train_loss= -13.013  val_loss= -12.896  val_ade=  1.56  val_fde=  3.10  lr=2.20e-04
+  ✓ Saved best checkpoint (val_ade=1.56 km)
+Epoch  37/50  train_loss= -13.013  val_loss= -12.910  val_ade=  1.48  val_fde=  2.91  lr=1.92e-04
+  ✓ Saved best checkpoint (val_ade=1.48 km)
+Epoch  38/50  train_loss= -13.013  val_loss= -12.901  val_ade=  1.75  val_fde=  3.35  lr=1.65e-04
+Epoch  39/50  train_loss= -13.014  val_loss= -12.912  val_ade=  1.41  val_fde=  2.82  lr=1.40e-04
+  ✓ Saved best checkpoint (val_ade=1.41 km)
+Epoch  40/50  train_loss= -13.014  val_loss= -12.910  val_ade=  1.45  val_fde=  2.89  lr=1.17e-04
+Epoch  41/50  train_loss= -13.014  val_loss= -12.902  val_ade=  1.47  val_fde=  2.88  lr=9.55e-05
+Epoch  42/50  train_loss= -13.014  val_loss= -12.911  val_ade=  1.60  val_fde=  3.14  lr=7.60e-05
+Epoch  43/50  train_loss= -13.014  val_loss= -12.913  val_ade=  1.45  val_fde=  2.90  lr=5.85e-05
+Epoch  44/50  train_loss= -13.014  val_loss= -12.911  val_ade=  1.40  val_fde=  2.80  lr=4.32e-05
+  ✓ Saved best checkpoint (val_ade=1.40 km)
+Epoch  45/50  train_loss= -13.014  val_loss= -12.908  val_ade=  1.43  val_fde=  2.83  lr=3.02e-05
+Epoch  46/50  train_loss= -13.014  val_loss= -12.910  val_ade=  1.42  val_fde=  2.80  lr=1.94e-05
+Epoch  47/50  train_loss= -13.014  val_loss= -12.912  val_ade=  1.38  val_fde=  2.73  lr=1.09e-05
+  ✓ Saved best checkpoint (val_ade=1.38 km)
+Epoch  48/50  train_loss= -13.015  val_loss= -12.910  val_ade=  1.36  val_fde=  2.70  lr=4.87e-06
+  ✓ Saved best checkpoint (val_ade=1.36 km)
+Epoch  49/50  train_loss= -13.015  val_loss= -12.910  val_ade=  1.36  val_fde=  2.72  lr=1.22e-06
+Epoch  50/50  train_loss= -13.015  val_loss= -12.910  val_ade=  1.36  val_fde=  2.72  lr=4.00e-09
+
+Training complete.  Best val ADE: 1.36 km
+Checkpoint: /home/aclark/alfie/fyp/ShipTCN/checkpoints/tcn_model.pt
+Log:        /home/aclark/alfie/fyp/ShipTCN/logs/tcn_training.log
+Curves:     /home/aclark/alfie/fyp/ShipTCN/logs/tcn_curves.png
+History:    /home/aclark/alfie/fyp/ShipTCN/logs/tcn_history.csv

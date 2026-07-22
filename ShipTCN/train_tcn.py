@@ -11,6 +11,7 @@ Usage:
     python train_tcn.py --epochs 10   # custom epoch count
 """
 
+import csv
 import os
 import sys
 import argparse
@@ -23,9 +24,11 @@ import torch.nn.functional as F
 
 _HERE        = os.path.dirname(os.path.abspath(__file__))
 _TRANSFORMER = os.path.abspath(os.path.join(_HERE, "..", "ShipTransformer"))
+_DATAHANDLING = os.path.abspath(os.path.join(_HERE, "..", "DataHandling"))
 sys.path.insert(0, _HERE)
 sys.path.insert(0, _TRANSFORMER)
-os.chdir(_TRANSFORMER)  # config.py / dataset.py use relative paths rooted here
+sys.path.insert(0, _DATAHANDLING)  # dataset.py lives here
+os.chdir(_TRANSFORMER)  # config.py checkpoint/log paths are relative to here
 from config    import cfg
 from dataset   import load_data
 from utils     import set_seed, haversine_tensor, load_water_mask
@@ -51,12 +54,92 @@ TCN_DROPOUT   = 0.2
 TCN_EPOCHS    = 50
 CKPT_PATH     = os.path.join(_HERE, "checkpoints", "tcn_model.pt")
 LOG_PATH      = os.path.join(_HERE, "logs", "tcn_training.log")
+CSV_PATH      = os.path.join(_HERE, "logs", "tcn_history.csv")
+PNG_PATH      = os.path.join(_HERE, "logs", "tcn_curves.png")
+
+
+# ── Training curves ────────────────────────────────────────────────────────────
+
+class TrainingCurves:
+    """Per-epoch metrics: appends to a CSV and re-renders a PNG after every epoch.
+
+    The plot is written to disk rather than shown in a window (matplotlib's Agg
+    backend), so this works fine on a headless box — open the PNG and it refreshes
+    as training goes.  The CSV keeps the raw numbers for writing up results.
+    """
+
+    FIELDS = ["epoch", "train_loss", "val_loss", "val_ade", "val_fde", "lr"]
+
+    def __init__(self, csv_path: str, png_path: str):
+        self.csv_path = csv_path
+        self.png_path = png_path
+        self.rows: list[dict] = []
+
+    def log(self, **metrics) -> None:
+        self.rows.append({f: metrics.get(f) for f in self.FIELDS})
+        self._write_csv()
+        self._save_png()
+
+    def _write_csv(self) -> None:
+        with open(self.csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=self.FIELDS)
+            writer.writeheader()
+            writer.writerows(self.rows)
+
+    def _column(self, key: str) -> list:
+        return [r[key] for r in self.rows]
+
+    def best_epoch(self):
+        """Epoch with the lowest val ADE — the checkpoint that gets kept."""
+        ades = self._column("val_ade")
+        return self._column("epoch")[ades.index(min(ades))] if ades else None
+
+    def _save_png(self) -> None:
+        try:
+            import matplotlib
+            matplotlib.use("Agg")          # headless: render to file, never to a window
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return   # no matplotlib — the CSV is still written
+
+        epochs = self._column("epoch")
+        fig, (ax_loss, ax_err, ax_lr) = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+        for key, label in [("train_loss", "train"), ("val_loss", "validation")]:
+            ax_loss.plot(epochs, self._column(key), marker="o", ms=3, lw=1.5, label=label)
+        ax_loss.set_title("Loss", loc="left", fontsize=10)
+        ax_loss.set_ylabel("weighted NLL")
+
+        for key, label in [("val_ade", "ADE"), ("val_fde", "FDE")]:
+            ax_err.plot(epochs, self._column(key), marker="o", ms=3, lw=1.5, label=label)
+        ax_err.set_title("Validation position error", loc="left", fontsize=10)
+        ax_err.set_ylabel("km")
+
+        ax_lr.plot(epochs, self._column("lr"), marker="o", ms=3, lw=1.5, label="learning rate")
+        ax_lr.set_yscale("log")
+        ax_lr.set_title("Learning rate", loc="left", fontsize=10)
+        ax_lr.set_ylabel("lr")
+        ax_lr.set_xlabel("epoch")
+
+        best = self.best_epoch()
+        for ax in (ax_loss, ax_err, ax_lr):
+            if best is not None:
+                ax.axvline(best, color="grey", ls=":", lw=1)
+            ax.grid(alpha=0.25)
+            ax.legend(fontsize=8, loc="best")
+
+        title = f"TCN — {len(self.rows)} epochs"
+        if best is not None:
+            title += f"  |  best ADE = {min(self._column('val_ade')):.3f} km @ epoch {best}"
+        fig.suptitle(title, fontsize=11)
+        fig.tight_layout(rect=(0, 0, 1, 0.97))
+        fig.savefig(self.png_path, dpi=120)
+        plt.close(fig)
 
 
 # ── Land mask ──────────────────────────────────────────────────────────────────
-# Differentiable land-avoidance penalty, mirroring ShipTransformer/train.py and the
-# GRU baseline. Predicted absolute positions are sampled against an OSM-derived water
-# raster; predictions that fall on land incur a penalty proportional to how far inland.
+# Differentiable land-avoidance penalty (mirrors ShipTransformer/train.py):
+# predicted positions on land are penalised against an OSM-derived water raster.
 
 _LAND_RASTER: torch.Tensor | None = None
 
@@ -77,7 +160,7 @@ def _init_land_raster(erosion_cells: int = 2) -> None:
     land_np      = land_bool.astype(np.float32)
     _LAND_RASTER = torch.from_numpy(land_np).to(cfg.device)
     print(f"  [land mask] Raster ready "
-          f"({_LAND_RASTER.shape[0]}×{_LAND_RASTER.shape[1]} cells, 0.01° res, "
+          f"({_LAND_RASTER.shape[0]}×{_LAND_RASTER.shape[1]} cells, 0.005° res, "
           f"OSM-aware, eroded {erosion_cells} cell)")
 
 
@@ -105,12 +188,8 @@ def _land_penalty(pos: torch.Tensor) -> torch.Tensor:
 
 
 def _pred_abs_positions(mu: torch.Tensor, dec_input: torch.Tensor) -> torch.Tensor:
-    """Predicted absolute normalised LAT/LON from delta output + decoder input.
-
-    mu holds dLAT/dLON offsets; dec_input holds the absolute position the model
-    saw at each step.  pred_pos_t = clamp(prev_abs_t + delta_pred_t).  Returns
-    (B, T, 2) so the land raster is sampled at the actual predicted ship position.
-    """
+    """Absolute normalised LAT/LON (B, T, 2) = previous position + predicted delta,
+    so the land raster is sampled at the real predicted position, not in delta-space."""
     prev_lat = dec_input[:, :, 0] * _LAT_RNG + _LAT_LO
     prev_lon = dec_input[:, :, 1] * _LON_RNG + _LON_LO
     dlat     = mu[:, :, 0] * _DLAT_RNG + _DLAT_LO
@@ -212,8 +291,7 @@ def run_epoch(
                 lv_f  = log_var.float()
                 loss  = nll_loss(mu_f, lv_f, tgt_dec_loss.float()) / accum
 
-                # Land penalty: sample the raster at the predicted absolute
-                # positions (prev decoder position + predicted delta).
+                # Penalise predictions that land on land.
                 if cfg.land_penalty_weight > 0:
                     pred_pos = _pred_abs_positions(mu_f, tgt_input)
                     loss = loss + cfg.land_penalty_weight * _land_penalty(pred_pos) / accum
@@ -243,9 +321,8 @@ def run_epoch(
                 total_loss += loss.item() * accum
 
             else:
-                # Autoregressive validation — step-by-step with delta accumulation.
-                # decode_step outputs dLAT/dLON so we accumulate before constructing
-                # the next decoder input.
+                # Autoregressive validation: decode step by step, accumulating the
+                # predicted deltas into absolute positions for the next input.
                 _, dec_state = model.encode(src)
                 prev_abs = src[:, -1:, :N_DEC].float()  # (B, 1, 5) absolute normalised
                 mu_list, lv_list, abs_list = [], [], []
@@ -335,6 +412,9 @@ def main():
 
     log(f"\n=== TCN — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
 
+    # Rewritten every epoch, so the PNG can be watched while the run is going.
+    history = TrainingCurves(CSV_PATH, PNG_PATH)
+
     print("Loading data ...")
     train_loader, val_loader, _ = load_data()
 
@@ -407,6 +487,15 @@ def main():
         )
         log(msg)
 
+        history.log(
+            epoch      = epoch,
+            train_loss = train_m["loss"],
+            val_loss   = val_m["loss"],
+            val_ade    = val_m["ade"],
+            val_fde    = val_m["fde"],
+            lr         = lr,
+        )
+
         if val_m["ade"] < best_val_ade:
             best_val_ade = val_m["ade"]
             save_checkpoint(model, epoch, val_m["ade"], val_m["fde"], val_m["loss"])
@@ -415,6 +504,8 @@ def main():
     log(f"\nTraining complete.  Best val ADE: {best_val_ade:.2f} km")
     log(f"Checkpoint: {CKPT_PATH}")
     log(f"Log:        {LOG_PATH}")
+    log(f"Curves:     {PNG_PATH}")
+    log(f"History:    {CSV_PATH}")
     log_file.close()
 
 

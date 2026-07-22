@@ -1,31 +1,15 @@
 """
 model.py
 --------
-Ship Trajectory Transformer — probabilistic encoder-decoder.
+Ship Trajectory Transformer — a probabilistic encoder-decoder.
 
-The output head predicts a Gaussian distribution over the next position
-rather than a single point.  This serves two purposes:
+The output head predicts a Gaussian (mu, log_var) over the next position rather
+than a single point. This gives a well-calibrated NLL training loss and, at
+inference, free anomaly detection: the z-score of the observed position against
+the predicted distribution flags spoofing/jumps with no labelled data.
 
-  1. Training loss is Gaussian NLL instead of MSE, which is better calibrated
-     and naturally handles the fact that some futures are more uncertain.
-
-  2. Anomaly detection for free at inference time: the z-score of the actual
-     observed position against the predicted distribution is the anomaly score.
-     A vessel that has been spoofed (position jump) will be many σ away from
-     the model's prediction.  No labelled anomaly data is required.
-
-Architecture
-------------
-  encoder_input_proj  (n_enc_features → d_model)
-  decoder_input_proj  (n_dec_features → d_model)
-  mu_proj             (d_model → n_dec_features)
-  log_var_proj        (d_model → n_dec_features)
-
-Encoder and decoder may have different feature counts (n_enc_features ≠
-n_dec_features).  Typically the encoder sees the full feature set including
-SHIP_TYPE and DT (temporal irregularity), while the decoder only predicts
-the 5 dynamic movement features (LAT, LON, SOG, COG_SIN, COG_COS).
-SHIP_TYPE is kept as static context in the encoder; DT is encoder-only.
+The encoder sees the full 14-feature input; the decoder predicts only the 5
+movement features (LAT, LON, SOG, COG_SIN, COG_COS).
 """
 
 import math
@@ -153,20 +137,9 @@ class DecoderLayer(nn.Module):
 
 class ShipTrajectoryTransformer(nn.Module):
     """
-    Probabilistic encoder-decoder transformer for ship trajectory modelling.
-
-    forward() returns (mu, log_var) instead of a single point prediction.
-    Use anomaly_score() at inference to flag unusual behaviour.
-
-    Parameters
-    ----------
-    n_features     : total features per ping (stored in .bin files); used as
-                     default for n_enc_features / n_dec_features when not given.
-    n_enc_features : encoder input feature count (default: n_features).
-    n_dec_features : decoder input/output feature count (default: n_features).
-
-    Keeping n_enc_features > n_dec_features lets the encoder use static context
-    features (SHIP_TYPE, DT) without making the decoder predict them.
+    forward() returns (mu, log_var); anomaly_score() flags unusual behaviour.
+    n_enc_features > n_dec_features lets the encoder use context features
+    (SHIP_TYPE, DT) that the decoder never has to predict.
     """
 
     def __init__(
@@ -205,11 +178,8 @@ class ShipTrajectoryTransformer(nn.Module):
         self.mu_proj      = nn.Linear(d_model, n_dec)
         self.log_var_proj = nn.Linear(d_model, n_dec)
 
-        # Small xavier init + centred bias so initial predictions cluster near
-        # 0.5 (the middle of the normalised [0,1] target range) while keeping
-        # non-zero weights so gradient flows through mu to the decoder from
-        # epoch 1.  Zero-init blocked that path and caused a training collapse
-        # when the LR ramped up and mu_proj weight suddenly became large.
+        # Small-gain init with a 0.5 bias so predictions start near the middle of
+        # the normalised [0,1] range while gradients still flow through mu.
         nn.init.xavier_uniform_(self.mu_proj.weight, gain=0.1)
         nn.init.constant_(self.mu_proj.bias, 0.5)
 
@@ -220,13 +190,7 @@ class ShipTrajectoryTransformer(nn.Module):
 
     @staticmethod
     def _sanitise(x: torch.Tensor) -> torch.Tensor:
-        """Replace NaN and Inf with 0 so downstream linear layers stay finite.
-
-        The critical failure mode in fp16: an activation overflows to Inf, then
-        a linear layer with mixed-sign weights computes Inf + (−Inf) = NaN.
-        nan_to_num must handle both NaN *and* Inf — using nan=0 alone is not
-        enough because Inf passes through unchanged and causes NaN downstream.
-        """
+        """Replace NaN/Inf with 0 to keep fp16 activations finite through the layers."""
         return x.nan_to_num(nan=0.0, posinf=0.0, neginf=0.0)
 
     def _encode(self, src: torch.Tensor) -> torch.Tensor:
@@ -273,21 +237,11 @@ class ShipTrajectoryTransformer(nn.Module):
         log_var: torch.Tensor,
         target:  torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Per-timestep anomaly score: mean absolute z-score across features.
+        """Per-timestep anomaly score: mean absolute z-score across features.
 
-        High score → the observed position is far outside the predicted
-        distribution → likely anomalous (spoofing, position jump, error).
-
-        Parameters
-        ----------
-        mu, log_var : output of forward()   (batch, tgt_len, n_dec_features)
-        target      : actual observed data  (batch, tgt_len, n_dec_features)
-
-        Returns
-        -------
-        (batch, tgt_len) — score per predicted timestep; average over tgt_len
-        for a single-number track-level score.
+        A high score means the observed position is many sigma from the
+        prediction — likely spoofing, a jump, or an error. Inputs are (batch,
+        tgt_len, n_dec_features); returns (batch, tgt_len).
         """
         std = (log_var * 0.5).exp()
         return ((target - mu).abs() / (std + 1e-8)).mean(dim=-1)

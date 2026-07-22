@@ -1,0 +1,72 @@
+EDA findings — one entry per figure
+======================================================================
+
+01_dataset_summary.png
+    382,045,764 position reports from 58,689 vessels over 731 days.
+
+02_data_volume.png
+    Training draws on 382M reports from 58,689 vessels; the hold-out year contributes 25M from 9,881.
+
+03_temporal_coverage.png
+    Training spans 2024-01-01 to 2025-12-31 and coverage is effectively continuous. The hold-out is an earlier, disjoint period, so evaluation is a genuine forward-in-time test.
+
+04_data_quality.png
+    0.19% of reports fail a physical-plausibility check and are removed before training. All four faults are impossibilities rather than judgement calls, so dropping them is safe. A report can carry more than one fault, so the per-fault bars overlap.
+
+05_vessel_types.png
+    The fleet is heavily imbalanced: Pleasure/Sail dominates while Unknown is scarce. Ship type is given to the model as an input, and training windows are capped at 125,000 per type group so the rare classes are not drowned out.
+
+06_reporting_interval.png
+    Vessels report roughly every 5.2 minutes, and consistently so. This sets the time scale of the whole project: 90 input pings is about 7.8 hours of history, and 10 predicted pings is about 52 minutes ahead.
+
+07_speed_raw.png
+    60% of raw reports come from vessels that are moored or anchored and are filtered out before training — the model should learn how ships travel, not how they sit still. Moving vessels average 8.7 knots.
+
+08_reports_per_vessel.png
+    Activity is very uneven: the median vessel sent 725 reports while the busiest sent 209,691. Training is capped at 300 windows per vessel so a handful of very active ships cannot dominate what the model learns.
+
+09_vessel_overlap.png
+    82% of hold-out vessels also appear in training. The hold-out is a different *period*, not a different *fleet*, so it tests temporal generalisation; results are also reported separately for the 1,766 genuinely unseen vessels.
+
+10_preprocessing_funnel.png
+    382M raw reports reduce to 1,099,869 training windows. The first drop is stationary vessels and faulty reports being removed; the second is that each window is a run of 100 consecutive reports taken every 10.
+
+11_density_heatmap.png
+    The bright ribbons are the major lanes through the Danish Straits, the Kattegat and the Great Belt — the corridors where the model has the densest training signal and where it should predict best.
+
+12_position_scatter.png
+    A 120,000-point sample of individual reports after preprocessing. Coverage is confined to Danish waters, confirming the region filter is applied as intended.
+
+13_sample_trajectories.png
+    Two dozen cleaned voyages. Each is continuous and lane-following after gap-splitting and filtering, which is the visual check that segmentation worked.
+
+14_individual_voyage.png
+    One vessel's cleaned trajectory (173 pings) coloured by time, with its speed profile alongside. The path is continuous and the speed varies smoothly — no teleports and no gaps, which is what preprocessing is meant to produce.
+
+15_voyage_length.png
+    65% of cleaned voyages are shorter than one 100-ping window and therefore contribute no training data; the median voyage is 67 pings.
+
+16_dt_histogram.png
+    Within a voyage the interval is tightly concentrated around 5.1 minutes. Δt is fed to the model as a feature so it can reason about irregular sampling rather than assuming a fixed step.
+
+17_sog_histogram.png
+    After filtering, speeds concentrate in a cruising band with a low tail of manoeuvring near port. Near-stationary pings are already gone, so this is moving traffic only.
+
+18_cog_histogram.png
+    Course is far from uniform: the peaks fall on the headings of the main shipping lanes, which is the geographic structure the model is expected to learn.
+
+19_heading_histogram.png
+    Heading closely tracks course. Where heading is unavailable the pipeline substitutes course, which is why this mirrors the COG distribution.
+
+20_rot_histogram.png
+    Rate of turn is sharply peaked at zero — vessels travel straight most of the time. The rare non-zero values are the manoeuvres an anomaly detector most needs to model.
+
+21_correlation_matrix.png
+    The strongest off-diagonal relationship is COG vs Heading at 0.78. No pair approaches ±1, so the engineered features are not redundant and none can be dropped as a duplicate of another.
+
+22_sog_boxplot.png
+    The box is the normal cruising range; points beyond the whiskers are unusually fast vessels — exactly the extremes the anomaly detector should flag.
+
+23_rot_boxplot.png
+    Most pings sit at zero (straight-line travel); the scattered outliers are sharp turns — infrequent, but strong behavioural signals.
+

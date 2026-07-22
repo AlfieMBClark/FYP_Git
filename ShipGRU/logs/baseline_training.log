@@ -1,0 +1,178 @@
+
+=== GRU Baseline — 2026-07-17 21:51:21 ===
+Model: 2,463,242 trainable parameters
+Device: cuda  AMP: enabled
+Effective batch size: 1024
+Encoder sequence length: 90  Land penalty weight: 0.2
+
+Epoch   1/50  train_loss= -10.785  val_loss= -12.815  val_ade=  7.08  val_fde= 15.69  lr=1.32e-04
+  ✓ Saved best checkpoint (val_ade=7.08 km)
+Epoch   2/50  train_loss= -12.854  val_loss= -12.510  val_ade= 48.45  val_fde= 99.64  lr=3.72e-04
+Epoch   3/50  train_loss= -12.908  val_loss= -12.876  val_ade= 31.38  val_fde= 52.76  lr=6.69e-04
+Epoch   4/50  train_loss= -12.941  val_loss= -12.812  val_ade= 18.84  val_fde= 34.95  lr=9.08e-04
+Epoch   5/50  train_loss= -12.980  val_loss= -12.871  val_ade=  6.59  val_fde= 11.90  lr=1.00e-03
+  ✓ Saved best checkpoint (val_ade=6.59 km)
+Epoch   6/50  train_loss= -12.994  val_loss= -12.855  val_ade= 16.00  val_fde= 28.09  lr=9.99e-04
+Epoch   7/50  train_loss= -13.002  val_loss= -12.861  val_ade=  6.15  val_fde= 11.47  lr=9.95e-04
+  ✓ Saved best checkpoint (val_ade=6.15 km)
+Epoch   8/50  train_loss= -13.006  val_loss= -12.877  val_ade=  6.19  val_fde= 11.59  lr=9.89e-04
+Epoch   9/50  train_loss= -13.008  val_loss= -12.876  val_ade=  4.17  val_fde=  7.80  lr=9.81e-04
+  ✓ Saved best checkpoint (val_ade=4.17 km)
+Epoch  10/50  train_loss= -13.011  val_loss= -12.882  val_ade=  5.73  val_fde= 10.57  lr=9.70e-04
+Epoch  11/50  train_loss= -13.012  val_loss= -12.884  val_ade=  3.48  val_fde=  6.35  lr=9.57e-04
+  ✓ Saved best checkpoint (val_ade=3.48 km)
+Epoch  12/50  train_loss= -13.014  val_loss= -12.869  val_ade=  6.01  val_fde= 11.33  lr=9.41e-04
+Epoch  13/50  train_loss= -13.015  val_loss= -12.890  val_ade=  2.57  val_fde=  4.74  lr=9.24e-04
+  ✓ Saved best checkpoint (val_ade=2.57 km)
+Epoch  14/50  train_loss= -13.017  val_loss= -12.889  val_ade=  3.96  val_fde=  7.08  lr=9.04e-04
+Epoch  15/50  train_loss= -13.018  val_loss= -12.886  val_ade=  4.11  val_fde=  7.73  lr=8.83e-04
+Epoch  16/50  train_loss= -13.019  val_loss= -12.885  val_ade=  1.77  val_fde=  3.37  lr=8.60e-04
+  ✓ Saved best checkpoint (val_ade=1.77 km)
+Epoch  17/50  train_loss= -13.020  val_loss= -12.886  val_ade=  4.16  val_fde=  7.07  lr=8.35e-04
+Epoch  18/50  train_loss= -13.022  val_loss= -12.892  val_ade=  5.88  val_fde= 10.67  lr=8.08e-04
+Epoch  19/50  train_loss= -13.023  val_loss= -12.889  val_ade=  2.70  val_fde=  4.92  lr=7.80e-04
+Epoch  20/50  train_loss= -13.024  val_loss= -12.895  val_ade=  2.32  val_fde=  4.42  lr=7.50e-04
+Epoch  21/50  train_loss= -13.025  val_loss= -12.883  val_ade=  4.09  val_fde=  7.01  lr=7.19e-04
+Epoch  22/50  train_loss= -13.026  val_loss= -12.891  val_ade=  1.98  val_fde=  3.58  lr=6.87e-04
+Epoch  23/50  train_loss= -13.028  val_loss= -12.885  val_ade=  2.18  val_fde=  4.09  lr=6.54e-04
+Epoch  24/50  train_loss= -13.029  val_loss= -12.889  val_ade=  2.75  val_fde=  4.99  lr=6.21e-04
+Epoch  25/50  train_loss= -13.030  val_loss= -12.890  val_ade=  1.72  val_fde=  3.19  lr=5.87e-04
+  ✓ Saved best checkpoint (val_ade=1.72 km)
+Epoch  26/50  train_loss= -13.031  val_loss= -12.894  val_ade=  1.99  val_fde=  3.71  lr=5.52e-04
+Epoch  27/50  train_loss= -13.032  val_loss= -12.890  val_ade=  1.68  val_fde=  3.17  lr=5.17e-04
+  ✓ Saved best checkpoint (val_ade=1.68 km)
+Epoch  28/50  train_loss= -13.033  val_loss= -12.887  val_ade=  2.44  val_fde=  4.36  lr=4.83e-04
+Epoch  29/50  train_loss= -13.034  val_loss= -12.888  val_ade=  2.52  val_fde=  4.52  lr=4.48e-04
+Epoch  30/50  train_loss= -13.035  val_loss= -12.886  val_ade=  2.25  val_fde=  4.06  lr=4.13e-04
+Epoch  31/50  train_loss= -13.036  val_loss= -12.885  val_ade=  1.71  val_fde=  3.16  lr=3.79e-04
+Epoch  32/50  train_loss= -13.037  val_loss= -12.883  val_ade=  1.99  val_fde=  3.69  lr=3.45e-04
+Epoch  33/50  train_loss= -13.037  val_loss= -12.884  val_ade=  1.79  val_fde=  3.38  lr=3.13e-04
+Epoch  34/50  train_loss= -13.038  val_loss= -12.888  val_ade=  1.78  val_fde=  3.31  lr=2.81e-04
+Epoch  35/50  train_loss= -13.039  val_loss= -12.883  val_ade=  1.57  val_fde=  2.94  lr=2.50e-04
+  ✓ Saved best checkpoint (val_ade=1.57 km)
+Epoch  36/50  train_loss= -13.040  val_loss= -12.887  val_ade=  2.11  val_fde=  3.82  lr=2.20e-04
+Epoch  37/50  train_loss= -13.040  val_loss= -12.882  val_ade=  1.50  val_fde=  2.83  lr=1.92e-04
+  ✓ Saved best checkpoint (val_ade=1.50 km)
+Epoch  38/50  train_loss= -13.041  val_loss= -12.880  val_ade=  1.52  val_fde=  2.87  lr=1.65e-04
+Epoch  39/50  train_loss= -13.041  val_loss= -12.882  val_ade=  1.49  val_fde=  2.81  lr=1.40e-04
+  ✓ Saved best checkpoint (val_ade=1.49 km)
+Epoch  40/50  train_loss= -13.042  val_loss= -12.882  val_ade=  1.70  val_fde=  3.14  lr=1.17e-04
+Epoch  41/50  train_loss= -13.042  val_loss= -12.883  val_ade=  1.42  val_fde=  2.69  lr=9.55e-05
+  ✓ Saved best checkpoint (val_ade=1.42 km)
+Epoch  42/50  train_loss= -13.043  val_loss= -12.883  val_ade=  1.45  val_fde=  2.75  lr=7.60e-05
+Epoch  43/50  train_loss= -13.043  val_loss= -12.883  val_ade=  1.37  val_fde=  2.61  lr=5.85e-05
+  ✓ Saved best checkpoint (val_ade=1.37 km)
+Epoch  44/50  train_loss= -13.043  val_loss= -12.882  val_ade=  1.31  val_fde=  2.51  lr=4.32e-05
+  ✓ Saved best checkpoint (val_ade=1.31 km)
+Epoch  45/50  train_loss= -13.043  val_loss= -12.882  val_ade=  1.35  val_fde=  2.57  lr=3.02e-05
+Epoch  46/50  train_loss= -13.044  val_loss= -12.882  val_ade=  1.32  val_fde=  2.51  lr=1.94e-05
+Epoch  47/50  train_loss= -13.044  val_loss= -12.883  val_ade=  1.27  val_fde=  2.43  lr=1.09e-05
+  ✓ Saved best checkpoint (val_ade=1.27 km)
+Epoch  48/50  train_loss= -13.044  val_loss= -12.883  val_ade=  1.26  val_fde=  2.41  lr=4.87e-06
+  ✓ Saved best checkpoint (val_ade=1.26 km)
+Epoch  49/50  train_loss= -13.044  val_loss= -12.882  val_ade=  1.26  val_fde=  2.42  lr=1.22e-06
+  ✓ Saved best checkpoint (val_ade=1.26 km)
+Epoch  50/50  train_loss= -13.044  val_loss= -12.882  val_ade=  1.26  val_fde=  2.42  lr=4.00e-09
+
+Training complete.  Best val ADE: 1.26 km
+Checkpoint: /home/aclark/alfie/fyp/ShipGRU/checkpoints/baseline_model.pt
+Log:        /home/aclark/alfie/fyp/ShipGRU/logs/baseline_training.log
+Curves:     /home/aclark/alfie/fyp/ShipGRU/logs/baseline_curves.png
+History:    /home/aclark/alfie/fyp/ShipGRU/logs/baseline_history.csv
+
+=== GRU Baseline — 2026-07-18 02:46:07 ===
+  [smoke-test] Using 2 train batches + 1 val batch.
+Model: 2,463,242 trainable parameters
+Device: cuda  AMP: enabled
+Effective batch size: 1024
+Encoder sequence length: 90  Land penalty weight: 0.2
+
+Epoch   1/1  train_loss=   0.985  val_loss=   0.495  val_ade=851.15  val_fde=1232.65  lr=4.00e-09
+  ✓ Saved best checkpoint (val_ade=851.15 km)
+
+Training complete.  Best val ADE: 851.15 km
+Checkpoint: /home/aclark/alfie/fyp/ShipGRU/checkpoints/baseline_model.pt
+Log:        /home/aclark/alfie/fyp/ShipGRU/logs/baseline_training.log
+Curves:     /home/aclark/alfie/fyp/ShipGRU/logs/baseline_curves.png
+History:    /home/aclark/alfie/fyp/ShipGRU/logs/baseline_history.csv
+
+=== GRU Baseline — 2026-07-18 02:49:27 ===
+Model: 2,463,242 trainable parameters
+Device: cuda  AMP: enabled
+Effective batch size: 1024
+Encoder sequence length: 90  Land penalty weight: 0.2
+
+Epoch   1/50  train_loss= -10.785  val_loss= -12.815  val_ade=  7.08  val_fde= 15.69  lr=1.32e-04
+  ✓ Saved best checkpoint (val_ade=7.08 km)
+Epoch   2/50  train_loss= -12.854  val_loss= -12.510  val_ade= 48.45  val_fde= 99.64  lr=3.72e-04
+Epoch   3/50  train_loss= -12.908  val_loss= -12.876  val_ade= 31.38  val_fde= 52.76  lr=6.69e-04
+Epoch   4/50  train_loss= -12.941  val_loss= -12.812  val_ade= 18.84  val_fde= 34.95  lr=9.08e-04
+Epoch   5/50  train_loss= -12.980  val_loss= -12.871  val_ade=  6.59  val_fde= 11.90  lr=1.00e-03
+  ✓ Saved best checkpoint (val_ade=6.59 km)
+Epoch   6/50  train_loss= -12.994  val_loss= -12.855  val_ade= 16.00  val_fde= 28.09  lr=9.99e-04
+Epoch   7/50  train_loss= -13.002  val_loss= -12.861  val_ade=  6.15  val_fde= 11.47  lr=9.95e-04
+  ✓ Saved best checkpoint (val_ade=6.15 km)
+Epoch   8/50  train_loss= -13.006  val_loss= -12.877  val_ade=  6.19  val_fde= 11.59  lr=9.89e-04
+Epoch   9/50  train_loss= -13.008  val_loss= -12.876  val_ade=  4.17  val_fde=  7.80  lr=9.81e-04
+  ✓ Saved best checkpoint (val_ade=4.17 km)
+Epoch  10/50  train_loss= -13.011  val_loss= -12.882  val_ade=  5.73  val_fde= 10.57  lr=9.70e-04
+Epoch  11/50  train_loss= -13.012  val_loss= -12.884  val_ade=  3.48  val_fde=  6.35  lr=9.57e-04
+  ✓ Saved best checkpoint (val_ade=3.48 km)
+Epoch  12/50  train_loss= -13.014  val_loss= -12.869  val_ade=  6.01  val_fde= 11.33  lr=9.41e-04
+Epoch  13/50  train_loss= -13.015  val_loss= -12.890  val_ade=  2.57  val_fde=  4.74  lr=9.24e-04
+  ✓ Saved best checkpoint (val_ade=2.57 km)
+Epoch  14/50  train_loss= -13.017  val_loss= -12.889  val_ade=  3.96  val_fde=  7.08  lr=9.04e-04
+Epoch  15/50  train_loss= -13.018  val_loss= -12.886  val_ade=  4.11  val_fde=  7.73  lr=8.83e-04
+Epoch  16/50  train_loss= -13.019  val_loss= -12.885  val_ade=  1.77  val_fde=  3.37  lr=8.60e-04
+  ✓ Saved best checkpoint (val_ade=1.77 km)
+Epoch  17/50  train_loss= -13.020  val_loss= -12.886  val_ade=  4.16  val_fde=  7.07  lr=8.35e-04
+Epoch  18/50  train_loss= -13.022  val_loss= -12.892  val_ade=  5.88  val_fde= 10.67  lr=8.08e-04
+Epoch  19/50  train_loss= -13.023  val_loss= -12.889  val_ade=  2.70  val_fde=  4.92  lr=7.80e-04
+Epoch  20/50  train_loss= -13.024  val_loss= -12.895  val_ade=  2.32  val_fde=  4.42  lr=7.50e-04
+Epoch  21/50  train_loss= -13.025  val_loss= -12.883  val_ade=  4.09  val_fde=  7.01  lr=7.19e-04
+Epoch  22/50  train_loss= -13.026  val_loss= -12.891  val_ade=  1.98  val_fde=  3.58  lr=6.87e-04
+Epoch  23/50  train_loss= -13.028  val_loss= -12.885  val_ade=  2.18  val_fde=  4.09  lr=6.54e-04
+Epoch  24/50  train_loss= -13.029  val_loss= -12.889  val_ade=  2.75  val_fde=  4.99  lr=6.21e-04
+Epoch  25/50  train_loss= -13.030  val_loss= -12.890  val_ade=  1.72  val_fde=  3.19  lr=5.87e-04
+  ✓ Saved best checkpoint (val_ade=1.72 km)
+Epoch  26/50  train_loss= -13.031  val_loss= -12.894  val_ade=  1.99  val_fde=  3.71  lr=5.52e-04
+Epoch  27/50  train_loss= -13.032  val_loss= -12.890  val_ade=  1.68  val_fde=  3.17  lr=5.17e-04
+  ✓ Saved best checkpoint (val_ade=1.68 km)
+Epoch  28/50  train_loss= -13.033  val_loss= -12.887  val_ade=  2.44  val_fde=  4.36  lr=4.83e-04
+Epoch  29/50  train_loss= -13.034  val_loss= -12.888  val_ade=  2.52  val_fde=  4.52  lr=4.48e-04
+Epoch  30/50  train_loss= -13.035  val_loss= -12.886  val_ade=  2.25  val_fde=  4.06  lr=4.13e-04
+Epoch  31/50  train_loss= -13.036  val_loss= -12.885  val_ade=  1.71  val_fde=  3.16  lr=3.79e-04
+Epoch  32/50  train_loss= -13.037  val_loss= -12.883  val_ade=  1.99  val_fde=  3.69  lr=3.45e-04
+Epoch  33/50  train_loss= -13.037  val_loss= -12.884  val_ade=  1.79  val_fde=  3.38  lr=3.13e-04
+Epoch  34/50  train_loss= -13.038  val_loss= -12.888  val_ade=  1.78  val_fde=  3.31  lr=2.81e-04
+Epoch  35/50  train_loss= -13.039  val_loss= -12.883  val_ade=  1.57  val_fde=  2.94  lr=2.50e-04
+  ✓ Saved best checkpoint (val_ade=1.57 km)
+Epoch  36/50  train_loss= -13.040  val_loss= -12.887  val_ade=  2.11  val_fde=  3.82  lr=2.20e-04
+Epoch  37/50  train_loss= -13.040  val_loss= -12.882  val_ade=  1.50  val_fde=  2.83  lr=1.92e-04
+  ✓ Saved best checkpoint (val_ade=1.50 km)
+Epoch  38/50  train_loss= -13.041  val_loss= -12.880  val_ade=  1.52  val_fde=  2.87  lr=1.65e-04
+Epoch  39/50  train_loss= -13.041  val_loss= -12.882  val_ade=  1.49  val_fde=  2.81  lr=1.40e-04
+  ✓ Saved best checkpoint (val_ade=1.49 km)
+Epoch  40/50  train_loss= -13.042  val_loss= -12.882  val_ade=  1.70  val_fde=  3.14  lr=1.17e-04
+Epoch  41/50  train_loss= -13.042  val_loss= -12.883  val_ade=  1.42  val_fde=  2.69  lr=9.55e-05
+  ✓ Saved best checkpoint (val_ade=1.42 km)
+Epoch  42/50  train_loss= -13.043  val_loss= -12.883  val_ade=  1.45  val_fde=  2.75  lr=7.60e-05
+Epoch  43/50  train_loss= -13.043  val_loss= -12.883  val_ade=  1.37  val_fde=  2.61  lr=5.85e-05
+  ✓ Saved best checkpoint (val_ade=1.37 km)
+Epoch  44/50  train_loss= -13.043  val_loss= -12.882  val_ade=  1.31  val_fde=  2.51  lr=4.32e-05
+  ✓ Saved best checkpoint (val_ade=1.31 km)
+Epoch  45/50  train_loss= -13.043  val_loss= -12.882  val_ade=  1.35  val_fde=  2.57  lr=3.02e-05
+Epoch  46/50  train_loss= -13.044  val_loss= -12.882  val_ade=  1.32  val_fde=  2.51  lr=1.94e-05
+Epoch  47/50  train_loss= -13.044  val_loss= -12.883  val_ade=  1.27  val_fde=  2.43  lr=1.09e-05
+  ✓ Saved best checkpoint (val_ade=1.27 km)
+Epoch  48/50  train_loss= -13.044  val_loss= -12.883  val_ade=  1.26  val_fde=  2.41  lr=4.87e-06
+  ✓ Saved best checkpoint (val_ade=1.26 km)
+Epoch  49/50  train_loss= -13.044  val_loss= -12.882  val_ade=  1.26  val_fde=  2.42  lr=1.22e-06
+  ✓ Saved best checkpoint (val_ade=1.26 km)
+Epoch  50/50  train_loss= -13.044  val_loss= -12.882  val_ade=  1.26  val_fde=  2.42  lr=4.00e-09
+
+Training complete.  Best val ADE: 1.26 km
+Checkpoint: /home/aclark/alfie/fyp/ShipGRU/checkpoints/baseline_model.pt
+Log:        /home/aclark/alfie/fyp/ShipGRU/logs/baseline_training.log
+Curves:     /home/aclark/alfie/fyp/ShipGRU/logs/baseline_curves.png
+History:    /home/aclark/alfie/fyp/ShipGRU/logs/baseline_history.csv

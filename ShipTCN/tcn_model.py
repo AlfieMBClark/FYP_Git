@@ -1,22 +1,14 @@
 """
 tcn_model.py
 ------------
-Temporal Convolutional Network (TCN) encoder-decoder for ship trajectory
-prediction. Fair comparison to ShipTrajectoryTransformer and the GRU baseline —
-same data, same loss, same metrics. The only difference is the architecture:
-stacked causal, dilated 1-D convolutions with residual connections instead of
-recurrence or attention.
+Temporal Convolutional Network (TCN) encoder-decoder — a same-data/same-loss
+alternative to the Transformer and GRU baseline, using stacked causal dilated
+1-D convolutions instead of attention or recurrence.
 
-  * Encoder — a causal dilated TCN over the (60, 14) input window. Enough dilation
-    levels are used to give the last timestep a receptive field covering the whole
-    window; that final timestep's features are the context vector.
-  * Decoder — a causal dilated TCN over the decoder-input sequence, conditioned on
-    the context (concatenated to every step's channels). Causality means step t only
-    sees steps <= t, so teacher-forced training decodes all steps in parallel while
-    autoregressive inference re-runs the conv over the generated buffer.
-
-The encode / decode_step / forward / predict interface matches the GRU and LSTM
-models so the training and evaluation pipelines are shared.
+The encoder's dilation grows until its last timestep sees the whole input window;
+that timestep is the context vector. The decoder is another causal TCN conditioned
+on it. It exposes the same encode / decode_step / forward / predict interface as
+the GRU model, so the training and evaluation code is shared.
 """
 
 import math
@@ -27,7 +19,7 @@ from torch import Tensor
 
 
 class Chomp1d(nn.Module):
-    """Trim the right-hand padding so a Conv1d is strictly causal."""
+    """Trim the right-hand padding """
     def __init__(self, chomp_size: int):
         super().__init__()
         self.chomp_size = chomp_size
@@ -57,7 +49,7 @@ class TemporalBlock(nn.Module):
 
 
 class TemporalConvNet(nn.Module):
-    """Stack of TemporalBlocks with exponentially increasing dilation (1, 2, 4, ...)."""
+    """Stack of TemporalBlocks with exponentially increasing dilation """
     def __init__(self, n_in: int, channels: list[int], kernel: int, dropout: float):
         super().__init__()
         layers = []
@@ -82,13 +74,13 @@ def _levels_for_receptive_field(seq_len: int, kernel: int) -> int:
 class ShipTCNModel(nn.Module):
     def __init__(
         self,
-        n_features:   int,   # 14 — encoder input width (per timestep)
-        dec_features: int,   # 6  — decoder input width (per step)
-        out_features: int,   # 5  — output (mu/log_var) width
-        hidden_size:  int,   # 256 — channels per TCN level
-        num_layers:   int,   # 2  — decoder TCN levels (encoder grows to cover the window)
-        dropout:      float, # 0.2
-        seq_len_enc:  int,   # 60 — encoder window length (sizes the receptive field)
+        n_features:   int,   # 14 encoder input width (per timestep)
+        dec_features: int,   # 6 decoder input width (per step)
+        out_features: int,   # 5  output (mu/log_var) width
+        hidden_size:  int,   # 256  channels per TCN level
+        num_layers:   int,   # 2  decoder TCN levels (encoder grows to cover the window)
+        dropout:      float, 
+        seq_len_enc:  int,   # 90 
         kernel_size:  int = 3,
     ):
         super().__init__()
@@ -111,12 +103,12 @@ class ShipTCNModel(nn.Module):
             kernel=kernel_size, dropout=dropout,
         )
 
-        self.mu_proj      = nn.Linear(hidden_size, out_features)
+        self.mu_proj  = nn.Linear(hidden_size, out_features)
         self.log_var_proj = nn.Linear(hidden_size, out_features)
 
     def encode(self, src: Tensor) -> tuple[Tensor, tuple[Tensor, None]]:
         """
-        src: (B, 60, 14)
+        src: (B, 90, 14)
         Returns:
           context:    (B, hidden_size) — features of the final (fully-informed) timestep
           dec_state:  (context, buffer) — decoder state; buffer of generated inputs
@@ -160,7 +152,7 @@ class ShipTCNModel(nn.Module):
 
     def forward(
         self,
-        src:       Tensor,   # (B, 60, 14)
+        src:       Tensor,   # (B, 90, 14)
         tgt_input: Tensor,   # (B, 10, 6) — teacher-forced decoder input
     ) -> tuple[Tensor, Tensor]:
         """Teacher-forced forward pass (all steps in parallel). Returns mu, log_var (B,10,5)."""
@@ -170,7 +162,7 @@ class ShipTCNModel(nn.Module):
 
     def predict(
         self,
-        src:    Tensor,   # (B, 60, 14)
+        src:    Tensor,   # (B, 90, 14)
         tgt_dt: Tensor,   # (B, 10, 1) — ground-truth DT for each future step
         seed:   Tensor,   # (B, 1, 5)  — last encoder step (LAT,LON,SOG,COG_SIN,COG_COS)
     ) -> tuple[Tensor, Tensor]:
@@ -202,12 +194,12 @@ class ShipTCNModel(nn.Module):
 
 
 if __name__ == "__main__":
-    model = ShipTCNModel(14, 6, 5, 256, 2, 0.2, 60)
-    src = torch.randn(4, 60, 14)
+    # Quick shape sanity check for both the teacher-forced and autoregressive paths.
+    model = ShipTCNModel(14, 6, 5, 256, 2, 0.2, 90)
+    src = torch.randn(4, 90, 14)
     tgt = torch.randn(4, 10, 6)
     mu, lv = model(src, tgt)
     assert mu.shape == (4, 10, 5), f"forward shape wrong: {mu.shape}"
     mu2, lv2 = model.predict(src, tgt[:, :, 5:6], src[:, -1:, :5])
     assert mu2.shape == (4, 10, 5), f"predict shape wrong: {mu2.shape}"
-    # Teacher-forced and autoregressive must agree when fed the same inputs (causality check).
     print("tcn_model.py: OK")

@@ -3,9 +3,9 @@ predict.py — inference and anomaly scoring against a SQLite AIS database.
 
 Usage
 -----
-python predict.py --random --count 10 --db /home/aclark/alfie/ShipTransformer/data2/2023.db
+python predict.py --random --count 10 --db ../DataHandling/testing/2023.db
 
-# Random vessel from the default test DB (data/worldwide.db)
+# Random vessel from the default test DB (testing/2023.db)
 python predict.py --random
 
 # 10 random vessels on one map
@@ -20,8 +20,8 @@ python predict.py --mmsi 219123456 --all-windows
 # Save a matplotlib PNG alongside the terminal output
 python predict.py --random --plot --plot-out my_plot.png
 
-# Run against the DMA training DB instead of WorldwideAIS
-python predict.py --random --db data/dma.db
+# Run against the training DB instead of the 2023 hold-out
+python predict.py --random --db ../DataHandling/training/dma.db
 
 # Use a specific checkpoint and run on CPU
 python predict.py --random --checkpoint checkpoints/best_model.pt --device cpu
@@ -45,7 +45,7 @@ SEQ_ENC  = cfg.seq_len_enc
 SEQ_DEC  = cfg.seq_len_dec
 WINDOW   = SEQ_ENC + SEQ_DEC
 
-# Normalisation arrays for the full 7-feature ping vector
+# Normalisation arrays for the full NF-feature ping vector
 _LO  = np.array([cfg.norm_bounds[f][0] for f in FEAT], dtype=np.float32)
 _HI  = np.array([cfg.norm_bounds[f][1] for f in FEAT], dtype=np.float32)
 _RNG = _HI - _LO
@@ -193,9 +193,8 @@ _TS_FORMATS = (
 
 
 def _parse_ts(ts_str) -> float:
-    """Parse a DB timestamp to a UTC unix float. Returns NaN on failure so
-    unparseable rows are detectable instead of silently mapping to the epoch
-    (0.0), which used to corrupt DT computation and row ordering."""
+    """Parse a DB timestamp to a UTC unix float; returns NaN on failure so bad
+    rows stay detectable instead of silently mapping to the epoch."""
     if ts_str is None:
         return float("nan")
     if isinstance(ts_str, (int, float)):
@@ -268,30 +267,18 @@ def extract_windows(track_norm):
 def predict_autoregressive(model, src_np, device):
     """Autoregressive decode for SEQ_DEC steps.
 
-    DT handling: the last observed inter-ping interval (src[-1, DT_IDX]) is
-    reused as the DT for all predicted steps.  There is no ground-truth future
-    DT at inference, so this is the best available estimate.  For vessels with
-    consistent reporting rates (e.g. every 10s or every 5 min) the cumulative
-    time signal in the temporal PE will be accurate; for vessels with highly
-    variable intervals the later decoder steps may see a slightly wrong elapsed
-    time, but this is unavoidable without external knowledge of future gaps.
-
-    predict_deltas mode (cfg.predict_deltas=True): the model outputs dLAT/dLON
-    offsets; each step accumulates onto the previous absolute position before
-    being fed back as the next decoder input.
-
-    Always returns mu_pred (T, N_DEC) and sigma_pred (T, N_DEC) in normalised
-    [0,1] absolute-position space — callers use denormalise_dec() directly.
+    There is no future DT at inference, so the last observed interval is reused for
+    every predicted step. In delta mode each step's dLAT/dLON is accumulated onto
+    the previous position before being fed back in. Returns mu (T, N_DEC) and sigma
+    (T, N_DEC) in normalised absolute-position space.
     """
     src         = torch.from_numpy(src_np).unsqueeze(0).to(device)  # (1, SEQ_ENC, N_ENC)
     last_dt     = src[:, -1:, N_DEC:N_DEC_IN]                        # (1, 1, 1) — reuse last DT
     dec_input   = src[:, -1:, :N_DEC_IN]                             # (1, 1, N_DEC_IN)
     prev_motion = src[:, -1:, :N_DEC].float()                        # (1, 1, N_DEC) absolute
     mu_steps, sigma_steps = [], []
-    # Delta mode: the variance head is in delta-normalised units; absolute
-    # position uncertainty is the accumulated delta variance converted to
-    # absolute-normalised units. Without this, sigma (and hence z-scores)
-    # were in the wrong units — see sim_engine._batch_ar_predict.
+    # In delta mode the position uncertainty is the accumulated per-step delta
+    # variance, converted back to absolute-normalised units below.
     var_lat_deg2 = torch.zeros((1, 1, 1), device=src.device)
     var_lon_deg2 = torch.zeros((1, 1, 1), device=src.device)
 
@@ -608,7 +595,7 @@ def main():
     parser.add_argument("--anomaly-threshold", type=float, default=3.0)
     parser.add_argument("--db",                type=str,   default=cfg.test_db_path,
                         help="AIS database to predict against "
-                             f"(default: {cfg.test_db_path} — WorldwideAIS test set).")
+                             f"(default: {cfg.test_db_path} — 2023 hold-out test set).")
     parser.add_argument("--checkpoint",        type=str,   default=cfg.checkpoint_path)
     parser.add_argument("--device",            type=str,   default=cfg.device)
     args = parser.parse_args()
